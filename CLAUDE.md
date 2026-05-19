@@ -52,18 +52,70 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+# Container (production path)
+make build            # build the Docker image (~5–10 min first time)
+make up-d             # start detached
+make logs             # tail container logs
+make down             # stop (refuses if a job is running unless FORCE=1)
+make restart          # rebuild+restart (same guard)
+
+# Local Python dev (no Docker, no real rip)
+make test             # creates .venv, installs deps, runs pytest
+make dev              # uvicorn with --reload on host port $PORT
+
+# Manual / API smoke
+make scan             # GET /api/scan (container must be up)
+make jobs             # GET /api/jobs
+make help             # show all targets and effective variable values
 ```
+
+The Makefile auto-detects `PUID`/`PGID`/`CDROM_GID` from the invoking shell so
+files in `${OUTPUT_DIR}` end up owned by you, not root.
+
+**Never run `make restart` or `make down` while a HandBrake job is in progress** — the
+container's worker dies with the container and leaves a partial MP4. The Makefile's
+`check-no-active-jobs` target enforces this; override with `FORCE=1` if intended.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Single Docker container running a FastAPI + vanilla-JS web UI that orchestrates
+HandBrakeCLI. One drive, one GPU, one concurrent rip.
+
+```
+Browser (HTML/CSS/vanilla JS, SSE) ─HTTP─▶ FastAPI / Uvicorn ──▶ Ripper worker
+                                                                  └─▶ HandBrakeCLI
+                                                                       ├─▶ /dev/sr0 (libdvdcss)
+                                                                       └─▶ /output/<Plex path>
+```
+
+Module map (all in `app/`):
+
+| File | Responsibility |
+|---|---|
+| `main.py` | FastAPI routes (`/api/scan`, `/api/search`, `/api/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
+| `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult` |
+| `presets.py` | HandBrake argv builders for Quality (x265 CPU) and Speed (NVENC HEVC) modes |
+| `paths.py` | Plex-compliant output paths (`Movies/Title (Year)/…`, `TV Shows/Show/Season NN/Show SNNeNN.mp4`) |
+| `tmdb.py` | Async TMDB client (search movie/tv, season-episode list) — optional, gated on `TMDB_API_KEY` |
+| `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out |
+| `models.py` | Pydantic models shared across API and worker |
+| `static/`, `templates/` | UI (no build step — Jinja2 + vanilla JS + IBM Plex Sans/Mono fonts) |
+
+Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`):
+
+- Base: `nvidia/cuda:12.6.0-base-ubuntu24.04` (NVENC support)
+- Apt: `handbrake-cli`, `libdvd-pkg` (builds `libdvdcss2` at install time), `libdvdread8t64`, `libdvdnav4`, `lsdvd`, `gosu`, `python3.12`
+- Entrypoint creates an `app` user with the host-supplied PUID/PGID, joins the cdrom group, chowns `/output`, and `gosu`-drops to that user before launching uvicorn — so PID 1 inside the container runs as your host UID.
+- `docker-compose.yml` device-mounts `/dev/sr0` and adds `group_add: ${CDROM_GID:-24}` for drive read access.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **Subprocesses** are launched with asyncio's argv-based spawner (never shell strings) — no command-injection surface even with user-provided titles/years.
+- **HandBrake progress** is parsed from raw byte chunks split on `\r` or `\n` (HandBrake uses CR to overwrite progress lines; line-based reads would block forever).
+- **One job at a time** — there's only one optical drive and one GPU, so parallel rips just thrash both.
+- **Output cleanup** — non-zero exit from HandBrake means no `moov` atom → unplayable file. The ripper unlinks the partial unconditionally on cancel/fail.
+- **No build step on the frontend** — just `<link>`/`<script>` tags. `?v=<token>` query strings (per-container-start hex) bust the browser cache after rebuilds so stale JS never collides with new HTML.
+- **Plex naming** matches the user's existing library convention exactly: TV shows omit the year (`TV Shows/Deadwood/Season 01/Deadwood S01E01.mp4`), movies use `Movies/Title (Year)/Title (Year).mp4` with `- cd2` etc. for multi-part. Sanitization strips OS-illegal chars but keeps spaces and `!`.
+- **Tests** never depend on a real DVD drive — `tests/fixtures/scan_*.txt` are recorded `HandBrakeCLI --json --scan` outputs; `respx` mocks TMDB HTTP.
+- **Secrets** (just `TMDB_API_KEY` today) live in `.env`, which is gitignored. `.env.example` is the template.
