@@ -1,0 +1,4 @@
+HandBrake 1.7.3
+Opening /dev/sr0...
+[15:23:01] dvdnav: vm: failed to open device /dev/sr0
+[15:23:01] scan: unable to open input

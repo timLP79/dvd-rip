@@ -1,0 +1,29 @@
+services:
+  dvd-rip:
+    build: .
+    container_name: dvd-rip
+    ports:
+      - "8000:8000"
+    devices:
+      - "${DVD_DEVICE:-/dev/sr0}:/dev/sr0"
+    volumes:
+      - "${OUTPUT_DIR:-./output}:/output"
+    environment:
+      DVD_DEVICE: /dev/sr0
+      OUTPUT_ROOT: /output
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      CDROM_GID: "${CDROM_GID:-24}"
+      TMDB_API_KEY: "${TMDB_API_KEY:-}"
+    group_add:
+      - "${CDROM_GID:-24}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
+    # On-demand only: do not auto-start on host boot / Docker daemon restart.
+    # Start with `make up` (or `make up-d`); stop with `make down` (or Ctrl-C).
+    restart: "no"

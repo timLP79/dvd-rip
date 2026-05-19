@@ -1,0 +1,21 @@
+JSON Title Set: {
+    "MainFeature": 0,
+    "TitleList": [
+        {
+            "Index": 1,
+            "Duration": {"Hours": 0, "Minutes": 25, "Seconds": 0},
+            "Geometry": {"Width": 720, "Height": 480},
+            "ChapterList": [{"Name": "Chapter 1"}, {"Name": "Chapter 2"}],
+            "AudioList": [{"TrackNumber": 1, "Language": "English", "CodecName": "ac3"}],
+            "SubtitleList": []
+        },
+        {
+            "Index": 2,
+            "Duration": {"Hours": 0, "Minutes": 5, "Seconds": 0},
+            "Geometry": {"Width": 720, "Height": 480},
+            "ChapterList": [{"Name": "Chapter 1"}],
+            "AudioList": [{"TrackNumber": 1, "Language": "English", "CodecName": "ac3"}],
+            "SubtitleList": []
+        }
+    ]
+}

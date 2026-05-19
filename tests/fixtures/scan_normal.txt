@@ -1,0 +1,96 @@
+HandBrake 1.7.3 (2024010100) - Linux x86_64 - https://handbrake.fr
+2 CPUs detected
+Opening /dev/sr0...
+[15:23:01] CSS decryption available.
+[15:23:02] scan: DVD has 5 title(s)
+
+Version: {
+    "Arch": "x86_64",
+    "Name": "HandBrake",
+    "Official": true,
+    "RepoDate": "2024-01-01 00:00:00",
+    "RepoHash": "deadbeef",
+    "System": "Linux",
+    "Type": "release",
+    "Version": {
+        "Major": 1,
+        "Minor": 7,
+        "Point": 3
+    },
+    "VersionString": "1.7.3"
+}
+
+JSON Title Set: {
+    "MainFeature": 1,
+    "TitleList": [
+        {
+            "Index": 1,
+            "Name": "FEATURE",
+            "Duration": {
+                "Hours": 1,
+                "Minutes": 42,
+                "Seconds": 18,
+                "Ticks": 0
+            },
+            "Geometry": {
+                "Width": 720,
+                "Height": 480,
+                "PAR": {"Num": 32, "Den": 27}
+            },
+            "ChapterList": [
+                {"Name": "Chapter 1"},
+                {"Name": "Chapter 2"},
+                {"Name": "Chapter 3"},
+                {"Name": "Chapter 4"},
+                {"Name": "Chapter 5"},
+                {"Name": "Chapter 6"},
+                {"Name": "Chapter 7"},
+                {"Name": "Chapter 8"},
+                {"Name": "Chapter 9"},
+                {"Name": "Chapter 10"},
+                {"Name": "Chapter 11"},
+                {"Name": "Chapter 12"}
+            ],
+            "AudioList": [
+                {
+                    "TrackNumber": 1,
+                    "Language": "English",
+                    "LanguageCode": "eng",
+                    "CodecName": "ac3",
+                    "ChannelLayoutName": "5.1 Surround"
+                },
+                {
+                    "TrackNumber": 2,
+                    "Language": "French",
+                    "LanguageCode": "fra",
+                    "CodecName": "ac3",
+                    "ChannelLayoutName": "Stereo"
+                }
+            ],
+            "SubtitleList": [
+                {"TrackNumber": 1, "Language": "English", "LanguageCode": "eng"},
+                {"TrackNumber": 2, "Language": "Spanish", "LanguageCode": "spa"}
+            ]
+        },
+        {
+            "Index": 2,
+            "Duration": {"Hours": 0, "Minutes": 3, "Seconds": 12, "Ticks": 0},
+            "Geometry": {"Width": 720, "Height": 480, "PAR": {"Num": 1, "Den": 1}},
+            "ChapterList": [{"Name": "Chapter 1"}],
+            "AudioList": [
+                {"TrackNumber": 1, "Language": "English", "CodecName": "ac3", "ChannelLayoutName": "Stereo"}
+            ],
+            "SubtitleList": []
+        },
+        {
+            "Index": 3,
+            "Duration": {"Hours": 0, "Minutes": 0, "Seconds": 45, "Ticks": 0},
+            "Geometry": {"Width": 720, "Height": 480, "PAR": {"Num": 1, "Den": 1}},
+            "ChapterList": [{"Name": "Chapter 1"}],
+            "AudioList": [],
+            "SubtitleList": []
+        }
+    ]
+}
+
+[15:23:05] scan complete

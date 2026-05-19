@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DVD Rip</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}" />
+</head>
+<body data-tmdb-enabled="{{ 'true' if tmdb_enabled else 'false' }}">
+  <header class="topbar">
+    <h1 class="brand-title">DVD Rip</h1>
+    <div class="topbar-meta">
+      <span class="meta-cell"><span class="meta-label">Device</span> <code>{{ device }}</code></span>
+      <span class="meta-cell"><span class="meta-label">Output</span> <code>{{ output_root }}</code></span>
+      <span class="meta-cell"><span class="meta-label">TMDB</span> <code id="tmdb-status" class="tmdb-{{ 'on' if tmdb_enabled else 'off' }}">{{ 'enabled' if tmdb_enabled else 'disabled' }}</code></span>
+    </div>
+    <div class="topbar-actions">
+      <button id="btn-rescan" type="button" class="ghost">Rescan</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="scan-status" class="status">Scanning…</section>
+
+    <section id="disc-meta-section" class="panel" hidden>
+      <div class="section-head">
+        <h2 id="disc-label">Disc</h2>
+        <div class="content-type-toggle" role="radiogroup" aria-label="Content type">
+          <label><input type="radio" name="content_type" value="movie" checked /> <span>Movie</span></label>
+          <label><input type="radio" name="content_type" value="tv" /> <span>TV Show</span></label>
+        </div>
+      </div>
+
+      <div class="meta-row">
+        <input id="meta-search" type="text" placeholder="Search TMDB by title…" />
+        <button id="btn-search" type="button">Search TMDB</button>
+        <button id="btn-manual" type="button" class="secondary">Enter manually</button>
+      </div>
+
+      <ul id="search-results" class="search-results" hidden></ul>
+
+      <!-- Always shown when content_type=tv so the user sees & sets the season
+           BEFORE picking a show — otherwise picking a TV result loads season 1
+           episodes regardless of which disc is in the drive. -->
+      <div id="tv-disc-info" hidden>
+        <label class="tv-field">Season on this disc <input id="tv-season" type="number" min="1" value="1" /></label>
+      </div>
+
+      <div id="meta-manual" hidden>
+        <div class="manual-grid" id="manual-movie">
+          <label>Title <input id="movie-title" type="text" placeholder="The Matrix" /></label>
+          <label>Year  <input id="movie-year" type="number" placeholder="1999" min="1900" max="2100" /></label>
+        </div>
+        <div class="manual-grid" id="manual-tv" hidden>
+          <label>Show <input id="tv-show" type="text" placeholder="Deadwood" /></label>
+        </div>
+        <div class="manual-actions">
+          <button id="btn-manual-apply" type="button">Apply</button>
+        </div>
+      </div>
+
+      <div id="meta-selected" class="meta-selected" hidden></div>
+    </section>
+
+    <section id="titles-section" class="panel" hidden>
+      <div class="section-head">
+        <h2>Titles</h2>
+        <div class="encoder-toggle" role="radiogroup" aria-label="Encoder mode">
+          <label><input type="radio" name="encoder_mode" value="quality" checked /> <span>Quality <em>x265 · CPU</em></span></label>
+          <label><input type="radio" name="encoder_mode" value="speed" /> <span>Speed <em>NVENC · GPU</em></span></label>
+        </div>
+      </div>
+      <table id="titles" class="titles">
+        <thead>
+          <tr>
+            <th class="col-pick"><input id="select-all" type="checkbox" title="Select all" /></th>
+            <th>Title</th>
+            <th>Duration</th>
+            <th>Chapters</th>
+            <th>Frame</th>
+            <th>Tracks</th>
+          </tr>
+        </thead>
+        <tbody id="titles-body"></tbody>
+      </table>
+      <div class="actions">
+        <span id="rip-status" class="rip-status"></span>
+        <button id="btn-rip" type="button" disabled>Start Rip</button>
+      </div>
+    </section>
+
+    <section id="jobs-section" class="panel">
+      <div class="section-head">
+        <h2>Jobs</h2>
+      </div>
+      <ul id="jobs-list" class="jobs"></ul>
+    </section>
+  </main>
+
+  <template id="title-row-tpl">
+    <tr class="title-row">
+      <td class="col-pick"><input type="checkbox" class="pick" /></td>
+      <td class="col-index">
+        <span class="title-num"></span>
+        <!-- main-feature-badge inserted here by JS -->
+        <span class="assignment-movie" hidden>cd1</span>
+        <label class="assignment-tv" hidden>
+          E<input type="number" class="ep-num" min="1" value="1" />
+        </label>
+      </td>
+      <td class="col-duration"></td>
+      <td class="col-chapters"></td>
+      <td class="col-frame"></td>
+      <td class="col-tracks">
+        <details>
+          <summary>Audio &amp; Subtitles</summary>
+          <div class="tracks-grid">
+            <div>
+              <strong>Audio</strong>
+              <ul class="audio-list"></ul>
+            </div>
+            <div>
+              <strong>Subtitles</strong>
+              <ul class="subs-list"></ul>
+            </div>
+          </div>
+        </details>
+      </td>
+    </tr>
+  </template>
+
+  <template id="search-result-tpl">
+    <li class="search-result">
+      <img class="poster" alt="" />
+      <div class="search-meta">
+        <span class="search-title"></span>
+        <span class="search-year muted"></span>
+        <span class="search-overview muted"></span>
+      </div>
+      <button type="button" class="search-pick">Pick</button>
+    </li>
+  </template>
+
+  <template id="job-item-tpl">
+    <li class="job">
+      <div class="job-head">
+        <span class="job-title"></span>
+        <span class="job-status"></span>
+        <button class="job-cancel" type="button">Cancel</button>
+      </div>
+      <div class="progress"><div class="progress-bar"></div></div>
+      <div class="job-meta"></div>
+      <div class="job-error" hidden></div>
+    </li>
+  </template>
+
+  <script src="/static/app.js?v={{ asset_version }}"></script>
+</body>
+</html>
