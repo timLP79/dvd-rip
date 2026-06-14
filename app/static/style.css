@@ -566,14 +566,42 @@ button.secondary:hover:not(:disabled) {
 .tracks-grid input[type="checkbox"] { accent-color: var(--accent); }
 .tracks-grid .muted { color: var(--text-muted); font-size: 11px; }
 
+/* rip options (forced-subtitle toggle, etc.) */
+.rip-options {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+.opt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.opt input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  position: relative;
+  top: 2px;
+}
+.opt em {
+  display: block;
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 1px;
+}
+
 /* action row */
 .actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--rule);
+  margin-top: 14px;
   gap: 14px;
 }
 .rip-status {

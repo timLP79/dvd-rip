@@ -80,6 +80,10 @@ class TitleSelection(BaseModel):
 class RipRequest(BaseModel):
     dvd_label: str
     encoder_mode: EncoderMode = EncoderMode.QUALITY
+    # Run Foreign Audio Search and burn forced/foreign-dialogue subtitles into the
+    # picture. Default on for correctness; uncheck for plain-English discs to skip
+    # the slow scan pre-pass (selected subtitle tracks are still embedded either way).
+    burn_forced_subtitles: bool = True
     content_type: ContentType
     movie: Optional[MovieMetadata] = None
     tv: Optional[TVMetadata] = None

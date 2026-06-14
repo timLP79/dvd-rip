@@ -36,11 +36,16 @@ def build_handbrake_args(
     output_path: str,
     audio_tracks: list[int],
     subtitle_tracks: list[int],
+    burn_forced: bool,
     encoder_mode: EncoderMode,
 ) -> list[str]:
     """Build the HandBrakeCLI argv for a single rip job.
 
     Audio/subtitle indices are 1-based per HandBrake's convention.
+
+    `subtitle_tracks` are soft-muxed (selectable, off by default). When
+    `burn_forced` is set, HandBrake's Foreign Audio Search ("scan") is prepended
+    and the forced track it finds is burned into the picture.
     """
     if not audio_tracks:
         # HandBrake requires at least one audio track selection; default to track 1.
@@ -85,15 +90,20 @@ def build_handbrake_args(
         "--audio-fallback", "ac3",
     ]
 
-    if subtitle_tracks:
-        args += ["--subtitle", _comma_join(subtitle_tracks)]
-    else:
-        # 'scan' detects forced subtitles in the primary audio language and burns them in.
-        args += [
-            "--subtitle", "scan",
-            "--subtitle-burned", "scan",
-            "--subtitle-default", "scan",
-        ]
+    # Subtitle handling:
+    #   - burn_forced: prepend Foreign Audio Search ("scan") and burn the forced
+    #     foreign-dialogue track into the picture so it always shows (and
+    #     direct-plays on clients that can't render image subtitles).
+    #   - subtitle_tracks: soft-mux the selected disc tracks (e.g. full English)
+    #     as selectable, off-by-default tracks.
+    sub_spec: list[str] = []
+    if burn_forced:
+        sub_spec.append("scan")
+    sub_spec += [str(s) for s in subtitle_tracks]
+    if sub_spec:
+        args += ["--subtitle", ",".join(sub_spec)]
+        if burn_forced:
+            args += ["--subtitle-burned", "scan"]
 
     if encoder_mode is EncoderMode.QUALITY:
         args += [

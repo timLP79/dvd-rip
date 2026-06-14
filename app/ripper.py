@@ -51,7 +51,7 @@ class Ripper:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._jobs: dict[str, Job] = {}
         self._job_order: list[str] = []
-        self._selections: dict[str, tuple[TitleSelection, EncoderMode, str]] = {}
+        self._selections: dict[str, tuple[TitleSelection, EncoderMode, str, bool]] = {}
         self._subscribers: dict[str, list[asyncio.Queue[Job]]] = {}
         self._current_process: Optional[asyncio.subprocess.Process] = None
         self._current_job_id: Optional[str] = None
@@ -75,6 +75,7 @@ class Ripper:
         selection: TitleSelection,
         encoder_mode: EncoderMode,
         content_type: ContentType,
+        burn_forced: bool = True,
         movie: Optional[MovieMetadata] = None,
         tv: Optional[TVMetadata] = None,
     ) -> Job:
@@ -111,7 +112,7 @@ class Ripper:
         )
         self._jobs[job_id] = job
         self._job_order.append(job_id)
-        self._selections[job_id] = (selection, encoder_mode, str(output_path))
+        self._selections[job_id] = (selection, encoder_mode, str(output_path), burn_forced)
         self._subscribers[job_id] = []
         self._queue.put_nowait(job_id)
         self._trim_finished()
@@ -172,13 +173,14 @@ class Ripper:
                 self._update(job_id, status=JobStatus.FAILED, error=str(exc))
 
     async def _run_job(self, job_id: str) -> None:
-        selection, encoder_mode, output_path = self._selections[job_id]
+        selection, encoder_mode, output_path, burn_forced = self._selections[job_id]
         args = build_handbrake_args(
             device=self.device,
             title_index=selection.index,
             output_path=output_path,
             audio_tracks=selection.audio_tracks,
             subtitle_tracks=selection.subtitle_tracks,
+            burn_forced=burn_forced,
             encoder_mode=encoder_mode,
         )
         log.info("starting rip job %s: %s", job_id, shlex.join(args))

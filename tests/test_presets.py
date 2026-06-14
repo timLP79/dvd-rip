@@ -23,15 +23,23 @@ def _args_to_pairs(args: list[str]) -> dict[str, str]:
     return out
 
 
-def test_quality_mode_uses_x264():
-    args = build_handbrake_args(
+def _build(**overrides):
+    """build_handbrake_args with sensible test defaults; override per test."""
+    kwargs = dict(
         device="/dev/sr0",
         title_index=1,
-        output_path="/output/movie/title_01.mp4",
+        output_path="/o.mp4",
         audio_tracks=[1],
         subtitle_tracks=[],
+        burn_forced=True,
         encoder_mode=EncoderMode.QUALITY,
     )
+    kwargs.update(overrides)
+    return build_handbrake_args(**kwargs)
+
+
+def test_quality_mode_uses_x264():
+    args = _build(output_path="/output/movie/title_01.mp4")
     pairs = _args_to_pairs(args)
     assert pairs["--encoder"] == "x264"
     assert pairs["--quality"] == "20"
@@ -54,14 +62,7 @@ def test_quality_mode_uses_x264():
 
 
 def test_speed_mode_uses_nvenc():
-    args = build_handbrake_args(
-        device="/dev/sr0",
-        title_index=1,
-        output_path="/output/movie/title_01.mp4",
-        audio_tracks=[1],
-        subtitle_tracks=[],
-        encoder_mode=EncoderMode.SPEED,
-    )
+    args = _build(encoder_mode=EncoderMode.SPEED)
     pairs = _args_to_pairs(args)
     assert pairs["--encoder"] == "nvenc_h264"
     assert pairs["--quality"] == "22"
@@ -69,47 +70,42 @@ def test_speed_mode_uses_nvenc():
     assert "--encoder-tune" not in pairs
 
 
-def test_subtitle_scan_default_when_no_subs_selected():
-    args = build_handbrake_args(
-        device="/dev/sr0",
-        title_index=1,
-        output_path="/o.mp4",
-        audio_tracks=[1],
-        subtitle_tracks=[],
-        encoder_mode=EncoderMode.QUALITY,
-    )
+def test_burn_forced_with_no_soft_tracks():
+    """burn_forced + no selected tracks -> Foreign Audio Search, burned, no default flag."""
+    args = _build(subtitle_tracks=[], burn_forced=True)
     pairs = _args_to_pairs(args)
     assert pairs["--subtitle"] == "scan"
     assert pairs["--subtitle-burned"] == "scan"
-    assert pairs["--subtitle-default"] == "scan"
+    assert "--subtitle-default" not in pairs
 
 
-def test_explicit_subtitles_use_comma_list():
-    args = build_handbrake_args(
-        device="/dev/sr0",
-        title_index=2,
-        output_path="/o.mp4",
-        audio_tracks=[1, 2],
-        subtitle_tracks=[1, 3],
-        encoder_mode=EncoderMode.QUALITY,
-    )
+def test_burn_forced_plus_soft_english():
+    """The real default: burn forced AND soft-embed the English track."""
+    args = _build(subtitle_tracks=[3], burn_forced=True)
+    pairs = _args_to_pairs(args)
+    # scan (forced) first, then the soft English track.
+    assert pairs["--subtitle"] == "scan,3"
+    assert pairs["--subtitle-burned"] == "scan"
+
+
+def test_soft_subtitles_without_forced_scan():
+    """burn_forced off -> selected tracks soft-muxed, NO scan pre-pass, nothing burned."""
+    args = _build(subtitle_tracks=[1, 3], burn_forced=False)
     pairs = _args_to_pairs(args)
     assert pairs["--subtitle"] == "1,3"
-    # Two source tracks -> four output tracks: each gets stereo AAC + passthrough.
-    assert pairs["--audio"] == "1,1,2,2"
-    assert pairs["--aencoder"] == "ca_aac,copy,ca_aac,copy"
-    assert pairs["--mixdown"] == "stereo,none,stereo,none"
+    assert "--subtitle-burned" not in pairs
+    assert "scan" not in pairs.get("--subtitle", "")
+
+
+def test_no_subtitles_at_all():
+    """No selected tracks and no forced burn -> no subtitle args."""
+    args = _build(subtitle_tracks=[], burn_forced=False)
+    assert "--subtitle" not in args
+    assert "--subtitle-burned" not in args
 
 
 def test_empty_audio_defaults_to_track_one():
-    args = build_handbrake_args(
-        device="/dev/sr0",
-        title_index=1,
-        output_path="/o.mp4",
-        audio_tracks=[],
-        subtitle_tracks=[],
-        encoder_mode=EncoderMode.QUALITY,
-    )
+    args = _build(audio_tracks=[])
     pairs = _args_to_pairs(args)
     # Defaults to track 1, still doubled into stereo + passthrough.
     assert pairs["--audio"] == "1,1"

@@ -351,6 +351,10 @@ function renderTitles(scan) {
         cb.type = 'checkbox';
         cb.value = s.index;
         cb.dataset.role = 'subtitle';
+        // Auto-select English tracks so a full English subtitle track is embedded
+        // by default (user can still toggle others). Matches "I want English subs".
+        const lang = (s.language || '').toLowerCase();
+        cb.checked = lang.startsWith('eng');
         const label = document.createElement('label');
         label.append(cb, document.createTextNode(` #${s.index} `));
         const sub = document.createElement('span');
@@ -462,6 +466,7 @@ async function startRip() {
   const body = {
     dvd_label: state.scan.dvd_label,
     encoder_mode: encoderMode,
+    burn_forced_subtitles: $('#burn-forced').checked,
     content_type: state.selectedMeta.type,
     titles: selections,
   };

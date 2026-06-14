@@ -132,6 +132,7 @@ async def api_rip(payload: RipRequest, request: Request) -> dict:
             selection=selection,
             encoder_mode=payload.encoder_mode,
             content_type=payload.content_type,
+            burn_forced=payload.burn_forced_subtitles,
             movie=payload.movie,
             tv=payload.tv,
         )
