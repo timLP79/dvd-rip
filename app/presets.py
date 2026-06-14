@@ -1,10 +1,14 @@
 """HandBrakeCLI argument construction for Plex-optimized DVD rips.
 
-Two encoder modes:
+Two encoder modes, both H.264 for universal Plex direct-play (the user's clients
+are an Android phone + Chromecasts, which transcode HEVC):
 
-- QUALITY: x265 CPU, CRF 20, slow preset, grain tune. Best quality-per-byte for DVD source.
-- SPEED:   nvenc_h265 (Nvidia GPU), CRF 22, slow preset. Faster but larger files at the same
-           perceptual quality.
+- QUALITY: x264 CPU, CRF 20, slow preset. Transparent for SD; fast on a modern CPU.
+- SPEED:   nvenc_h264 (Nvidia GPU), CQ 22, slow preset. Near-instant; fine for TVs.
+
+H.264 is chosen over H.265 deliberately: at DVD resolution (480p) HEVC's
+compression edge shrinks to ~20-30%, while H.264 8-bit is the one format every
+Plex client direct-plays without a server-side transcode.
 
 Common settings target Plex playback:
 - AAC stereo + AC3 5.1 passthrough (Plex direct-plays both on virtually every client)
@@ -93,14 +97,13 @@ def build_handbrake_args(
 
     if encoder_mode is EncoderMode.QUALITY:
         args += [
-            "--encoder", "x265",
+            "--encoder", "x264",
             "--encoder-preset", "slow",
-            "--encoder-tune", "grain",
             "--quality", "20",
         ]
     elif encoder_mode is EncoderMode.SPEED:
         args += [
-            "--encoder", "nvenc_h265",
+            "--encoder", "nvenc_h264",
             "--encoder-preset", "slow",
             "--quality", "22",
         ]

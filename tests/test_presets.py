@@ -23,7 +23,7 @@ def _args_to_pairs(args: list[str]) -> dict[str, str]:
     return out
 
 
-def test_quality_mode_uses_x265():
+def test_quality_mode_uses_x264():
     args = build_handbrake_args(
         device="/dev/sr0",
         title_index=1,
@@ -33,10 +33,10 @@ def test_quality_mode_uses_x265():
         encoder_mode=EncoderMode.QUALITY,
     )
     pairs = _args_to_pairs(args)
-    assert pairs["--encoder"] == "x265"
+    assert pairs["--encoder"] == "x264"
     assert pairs["--quality"] == "20"
     assert pairs["--encoder-preset"] == "slow"
-    assert pairs["--encoder-tune"] == "grain"
+    assert "--encoder-tune" not in pairs  # grain tune dropped for H.264
     assert pairs["--format"] == "av_mp4"
     assert "--optimize" in args
     assert "--markers" in args
@@ -63,7 +63,7 @@ def test_speed_mode_uses_nvenc():
         encoder_mode=EncoderMode.SPEED,
     )
     pairs = _args_to_pairs(args)
-    assert pairs["--encoder"] == "nvenc_h265"
+    assert pairs["--encoder"] == "nvenc_h264"
     assert pairs["--quality"] == "22"
     assert pairs["--encoder-preset"] == "slow"
     assert "--encoder-tune" not in pairs

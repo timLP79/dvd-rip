@@ -95,7 +95,7 @@ Module map (all in `app/`):
 |---|---|
 | `main.py` | FastAPI routes (`/api/scan`, `/api/search`, `/api/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
 | `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult` |
-| `presets.py` | HandBrake argv builders for Quality (x265 CPU) and Speed (NVENC HEVC) modes |
+| `presets.py` | HandBrake argv builders for Quality (x264 CPU) and Speed (NVENC H.264) modes |
 | `paths.py` | Plex-compliant output paths (`Movies/Title (Year)/…`, `TV Shows/Show/Season NN/Show SNNeNN.mp4`) |
 | `tmdb.py` | Async TMDB client (search movie/tv, season-episode list) — optional, gated on `TMDB_API_KEY` |
 | `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out |

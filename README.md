@@ -3,10 +3,12 @@
 A single Docker container that turns an inserted DVD into Plex-ready MP4s with a local web UI.
 
 - Decrypts CSS with `libdvdcss`
-- Encodes with HandBrake — **Quality mode** (x265 CPU, CRF 20, `slow`, grain tune) by default,
-  **Speed mode** (NVENC HEVC) available as a toggle
-- Plex-friendly defaults: H.265 MP4 with faststart, AAC + AC3 audio, decomb deinterlace,
-  auto crop, anamorphic, chapter markers, forced-sub burn-in
+- Encodes with HandBrake — **Quality mode** (x264 CPU, CRF 20, `slow`) by default,
+  **Speed mode** (NVENC H.264) available as a toggle
+- Plex-friendly defaults: H.264 MP4 with faststart, AAC stereo + AC3/DTS passthrough,
+  decomb deinterlace, auto crop, anamorphic, chapter markers, forced-sub burn-in
+- H.264 (not H.265) for universal Plex direct-play — at DVD resolution HEVC's size
+  win is small, and H.264 8-bit never triggers a server transcode on phones/Chromecasts
 - One job at a time (single drive, single GPU), live progress over Server-Sent Events
 
 ## Requirements
@@ -156,7 +158,7 @@ fails), pre-create the directory owned by your `PUID:PGID` and the chown is a no
 
 - Confirm `nvidia-container-toolkit` is installed on the host and Docker is configured to
   use it: `docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi`
-- The Speed mode is best-effort. Fall back to Quality mode (CPU x265) if NVENC isn't available.
+- The Speed mode is best-effort. Fall back to Quality mode (CPU x264) if NVENC isn't available.
 
 ### Permissions on the DVD device
 
@@ -185,9 +187,14 @@ on the host.
 
 DVDs are interlaced 720×480 (NTSC) or 720×576 (PAL). At those resolutions:
 
-- **x265 at CRF 20 with `slow` preset, grain tune** produces near-source quality at roughly
-  1/3 the size of the original VOB files — typical 90-minute movie lands at 700 MB – 1.2 GB.
-- **NVENC HEVC at CRF 22** is 5–10× faster but ~15–25 % larger at perceptually similar quality.
+- **H.264, not H.265.** HEVC's compression edge is biggest at 4K; at DVD's 480p it
+  shrinks to ~20–30%, while H.264 8-bit is the one codec every Plex client direct-plays.
+  With an Android phone and Chromecasts, H.264 means playback never triggers a server-side
+  transcode — the small storage saving from HEVC isn't worth the transcode tax.
+- **x264 at CRF 20 with `slow` preset** produces near-source quality. A typical 90-minute
+  movie lands around 1–1.5 GB. x264 at SD is very fast on a modern CPU (hundreds of fps).
+- **NVENC H.264 at CQ 22** is far faster (GPU) but a bit larger at similar quality.
   Worth it for batch rips of bonus features where time matters more than bytes.
-- AAC + AC3 passthrough keeps Plex direct-playing on Roku, Apple TV, NVIDIA Shield, mobile.
+- **AAC stereo + AC3/DTS passthrough** (two audio tracks per source track): the stereo
+  AAC plays anywhere; the passthrough preserves the original 5.1 surround for AV receivers.
 - MP4 + faststart so Plex doesn't have to read the entire file before playback starts.

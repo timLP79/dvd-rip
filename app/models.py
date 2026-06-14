@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 
 
 class EncoderMode(str, Enum):
-    QUALITY = "quality"  # x265 CPU, CRF 20, slow preset
-    SPEED = "speed"      # nvenc_h265, CRF 22, slow preset
+    QUALITY = "quality"  # x264 CPU, CRF 20, slow preset
+    SPEED = "speed"      # nvenc_h264, CQ 22, slow preset
 
 
 class ContentType(str, Enum):
