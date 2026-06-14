@@ -42,6 +42,26 @@ def build_handbrake_args(
         # HandBrake requires at least one audio track selection; default to track 1.
         audio_tracks = [1]
 
+    # For each selected source track we emit TWO output tracks so Plex has both a
+    # universally-compatible stereo track and the original surround mix:
+    #   1. ca_aac / stereo   — plays on every client (phones, browsers, TVs)
+    #   2. copy / none       — passthrough of the original AC3/DTS surround,
+    #                          falling back to AC3 encode if the source codec
+    #                          can't live in an MP4 (--audio-fallback ac3)
+    # The stereo track is listed first so it's the default; clients (or Plex's
+    # per-device "preferred audio" setting) can select the surround track.
+    audio_out: list[int] = []      # source track per output track (duplicated)
+    aencoders: list[str] = []
+    mixdowns: list[str] = []
+    bitrates: list[str] = []
+    arates: list[str] = []
+    for t in audio_tracks:
+        audio_out += [t, t]
+        aencoders += ["ca_aac", "copy"]
+        mixdowns += ["stereo", "none"]
+        bitrates += ["160", "160"]   # bitrate is ignored for the copy/passthrough track
+        arates += ["auto", "auto"]
+
     args: list[str] = [
         "HandBrakeCLI",
         "--input", device,
@@ -53,14 +73,11 @@ def build_handbrake_args(
         "--decomb", "default",        # adaptive deinterlace
         "--crop-mode", "auto",
         "--auto-anamorphic",
-        "--audio", _comma_join(audio_tracks),
-        # Per-track encoder list: stereo AAC tracks get encoded, multi-channel passes through.
-        # Repeating ca_aac means: encode each selected track with AAC; HandBrake will fall back
-        # to copying when the source is AC3/DTS and we list `copy:ac3,copy:dts` via fallback.
-        "--aencoder", ",".join(["ca_aac"] * len(audio_tracks)),
-        "--ab", ",".join(["160"] * len(audio_tracks)),
-        "--mixdown", ",".join(["stereo"] * len(audio_tracks)),
-        "--arate", ",".join(["auto"] * len(audio_tracks)),
+        "--audio", _comma_join(audio_out),
+        "--aencoder", ",".join(aencoders),
+        "--ab", ",".join(bitrates),
+        "--mixdown", ",".join(mixdowns),
+        "--arate", ",".join(arates),
         "--audio-fallback", "ac3",
     ]
 

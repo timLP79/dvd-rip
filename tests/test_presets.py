@@ -46,7 +46,11 @@ def test_quality_mode_uses_x265():
     assert pairs["--input"] == "/dev/sr0"
     assert pairs["--output"] == "/output/movie/title_01.mp4"
     assert pairs["--title"] == "1"
-    assert pairs["--audio"] == "1"
+    # One selected source track -> two output tracks: stereo AAC + passthrough copy.
+    assert pairs["--audio"] == "1,1"
+    assert pairs["--aencoder"] == "ca_aac,copy"
+    assert pairs["--mixdown"] == "stereo,none"
+    assert pairs["--audio-fallback"] == "ac3"
 
 
 def test_speed_mode_uses_nvenc():
@@ -91,9 +95,10 @@ def test_explicit_subtitles_use_comma_list():
     )
     pairs = _args_to_pairs(args)
     assert pairs["--subtitle"] == "1,3"
-    assert pairs["--audio"] == "1,2"
-    assert pairs["--aencoder"] == "ca_aac,ca_aac"
-    assert pairs["--mixdown"] == "stereo,stereo"
+    # Two source tracks -> four output tracks: each gets stereo AAC + passthrough.
+    assert pairs["--audio"] == "1,1,2,2"
+    assert pairs["--aencoder"] == "ca_aac,copy,ca_aac,copy"
+    assert pairs["--mixdown"] == "stereo,none,stereo,none"
 
 
 def test_empty_audio_defaults_to_track_one():
@@ -106,4 +111,6 @@ def test_empty_audio_defaults_to_track_one():
         encoder_mode=EncoderMode.QUALITY,
     )
     pairs = _args_to_pairs(args)
-    assert pairs["--audio"] == "1"
+    # Defaults to track 1, still doubled into stereo + passthrough.
+    assert pairs["--audio"] == "1,1"
+    assert pairs["--aencoder"] == "ca_aac,copy"

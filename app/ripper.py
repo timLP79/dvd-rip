@@ -14,8 +14,9 @@ import logging
 import re
 import secrets
 import shlex
+from collections import deque
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Deque, Optional
 
 from .models import (
     ContentType,
@@ -190,8 +191,11 @@ class Ripper:
         )
         self._current_process = proc
         self._current_job_id = job_id
+        # Keep the last N non-progress output lines so a failure can report WHY
+        # (CSS decryption error, disk full, no audio track) instead of a bare exit code.
+        tail: Deque[str] = deque(maxlen=25)
         try:
-            await self._consume_progress(job_id, proc)
+            await self._consume_progress(job_id, proc, tail)
             rc = await proc.wait()
         finally:
             self._current_process = None
@@ -201,21 +205,21 @@ class Ripper:
             self._update(job_id, status=JobStatus.DONE, percent=100.0)
         else:
             cancelled = rc < 0 or self._jobs[job_id].status == JobStatus.CANCELLED
+            _cleanup_partial(output_path)
             if cancelled:
-                _cleanup_partial(output_path)
                 self._update(job_id, status=JobStatus.CANCELLED)
             else:
-                _cleanup_partial(output_path)
-                self._update(
-                    job_id,
-                    status=JobStatus.FAILED,
-                    error=f"HandBrakeCLI exited with code {rc}",
-                )
+                detail = "\n".join(tail).strip()
+                message = f"HandBrakeCLI exited with code {rc}"
+                if detail:
+                    message += f"\n{detail}"
+                self._update(job_id, status=JobStatus.FAILED, error=message)
 
     async def _consume_progress(
         self,
         job_id: str,
         proc: asyncio.subprocess.Process,
+        tail: Deque[str],
     ) -> None:
         # HandBrakeCLI emits "Encoding: task X of Y, P.PP %" lines terminated
         # with \r so they overwrite each other in a terminal. asyncio's
@@ -225,10 +229,10 @@ class Ripper:
         assert proc.stdout is not None
         buffer = bytearray()
         while True:
-            chunk = await proc.stdout.read(256)
+            chunk = await proc.stdout.read(4096)
             if not chunk:
                 if buffer:
-                    self._handle_line(job_id, buffer.decode(errors="replace"))
+                    self._handle_line(job_id, buffer.decode(errors="replace"), tail)
                 return
             buffer.extend(chunk)
             while True:
@@ -243,11 +247,16 @@ class Ripper:
                 line = bytes(buffer[:idx])
                 del buffer[: idx + 1]
                 if line:
-                    self._handle_line(job_id, line.decode(errors="replace"))
+                    self._handle_line(job_id, line.decode(errors="replace"), tail)
 
-    def _handle_line(self, job_id: str, line: str) -> None:
+    def _handle_line(self, job_id: str, line: str, tail: Deque[str]) -> None:
         match = _PROGRESS_RE.search(line)
         if not match:
+            # Not a progress tick — keep it for failure diagnostics. HandBrake's
+            # actual error (decryption, disk full, no audio) lands here.
+            stripped = line.strip()
+            if stripped:
+                tail.append(stripped)
             return
         pct = float(match.group("pct"))
         fps = float(match.group("fps")) if match.group("fps") else None

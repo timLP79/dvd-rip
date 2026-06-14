@@ -1,4 +1,7 @@
-from app.ripper import _PROGRESS_RE
+from collections import deque
+from pathlib import Path
+
+from app.ripper import Ripper, _PROGRESS_RE
 
 
 def test_progress_regex_with_eta():
@@ -23,3 +26,31 @@ def test_progress_regex_without_eta():
 def test_progress_regex_ignores_other_output():
     line = "Scanning title 1 of 5"
     assert _PROGRESS_RE.search(line) is None
+
+
+def test_handle_line_collects_non_progress_into_tail():
+    """Non-progress output (errors, warnings) is retained for failure diagnostics."""
+    ripper = Ripper(device="/dev/null", output_root=Path("/tmp"))
+    tail: deque[str] = deque(maxlen=25)
+
+    # A progress line does NOT go into the tail.
+    ripper._handle_line("nojob", "Encoding: task 1 of 1, 5.00 %", tail)
+    assert len(tail) == 0
+
+    # Error/warning lines DO accumulate (stripped, non-empty only).
+    ripper._handle_line("nojob", "libdvdcss: could not get title key", tail)
+    ripper._handle_line("nojob", "   ", tail)  # blank -> skipped
+    ripper._handle_line("nojob", "No space left on device", tail)
+    assert list(tail) == [
+        "libdvdcss: could not get title key",
+        "No space left on device",
+    ]
+
+
+def test_handle_line_tail_is_bounded():
+    ripper = Ripper(device="/dev/null", output_root=Path("/tmp"))
+    tail: deque[str] = deque(maxlen=25)
+    for i in range(100):
+        ripper._handle_line("nojob", f"log line {i}", tail)
+    assert len(tail) == 25
+    assert list(tail)[-1] == "log line 99"
