@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -88,7 +89,7 @@ def parse_output_path(path: Path, output_root: Path) -> Optional[RipRecord]:
             status=JobStatus.DONE,
             source="backfill",
         )
-    if len(parts) >= 2 and parts[0] == "TV Shows":
+    if len(parts) >= 4 and parts[0] == "TV Shows":
         m = _TV_FILE_RE.match(path.stem)
         if not m:
             return None
@@ -108,10 +109,18 @@ class Library:
     def __init__(self, db_path: str):
         self.db_path = db_path
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def init_db(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -140,11 +149,13 @@ class Library:
 
     def list_rips(self, *, include_unsuccessful: bool = False) -> list[RipRecord]:
         q = "SELECT * FROM rips"
+        params: list = []
         if not include_unsuccessful:
-            q += " WHERE status = 'done'"
+            q += " WHERE status = ?"
+            params.append(JobStatus.DONE.value)
         q += " ORDER BY datetime(created_at) DESC, id DESC"
         with self._connect() as conn:
-            rows = conn.execute(q).fetchall()
+            rows = conn.execute(q, params).fetchall()
         return [_row_to_record(r) for r in rows]
 
     def find_existing(
@@ -158,24 +169,30 @@ class Library:
         episode: Optional[int] = None,
     ) -> list[RipRecord]:
         ct = content_type.value if isinstance(content_type, ContentType) else content_type
-        clauses = ["status = 'done'", "content_type = ?"]
-        params: list = [ct]
+        clauses = ["status = ?", "content_type = ?"]
+        params: list = [JobStatus.DONE.value, ct]
         if tmdb_id is not None:
             clauses.append("tmdb_id = ?")
             params.append(tmdb_id)
         elif ct == "movie":
+            if not title:
+                return []
             clauses.append("LOWER(title) = LOWER(?)")
-            params.append(title or "")
+            params.append(title)
             if year is not None:
                 clauses.append("year = ?")
                 params.append(year)
-        else:
+        elif ct == "tv":
+            if not title or season is None or episode is None:
+                return []
             clauses.append("LOWER(title) = LOWER(?)")
-            params.append(title or "")
+            params.append(title)
             clauses.append("season = ?")
             params.append(season)
             clauses.append("episode = ?")
             params.append(episode)
+        else:
+            return []
         q = "SELECT * FROM rips WHERE " + " AND ".join(clauses) + \
             " ORDER BY datetime(created_at) DESC, id DESC"
         with self._connect() as conn:

@@ -128,3 +128,13 @@ def test_backfill_is_idempotent(tmp_path):
 def test_backfill_missing_dir_is_noop(tmp_path):
     lib = _lib(tmp_path)
     assert lib.backfill(str(tmp_path / "nope")) == 0
+
+
+def test_find_existing_returns_empty_on_insufficient_identity(tmp_path):
+    lib = _lib(tmp_path)
+    lib.record_rip(_movie(title="Heat", year=1995))
+    lib.record_rip(_tv(show="Deadwood", season=1, episode=1))
+    # movie with no title and no tmdb_id -> can't claim a dup
+    assert lib.find_existing(content_type=ContentType.MOVIE) == []
+    # tv missing episode -> can't claim a dup (no silent NULL match)
+    assert lib.find_existing(content_type=ContentType.TV, title="Deadwood", season=1) == []
