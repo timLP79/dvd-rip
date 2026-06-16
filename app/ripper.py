@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import secrets
 import shlex
+import time
 from collections import deque
 from pathlib import Path
 from typing import AsyncIterator, Deque, Optional
@@ -24,9 +26,11 @@ from .models import (
     Job,
     JobStatus,
     MovieMetadata,
+    RipRecord,
     TitleSelection,
     TVMetadata,
 )
+from .library import Library
 from .paths import movie_path, tv_episode_path, unique_path
 from .presets import build_handbrake_args
 
@@ -45,13 +49,15 @@ _MAX_FINISHED_JOBS = 50
 class Ripper:
     """Owns the job queue, the worker task, and progress fanout."""
 
-    def __init__(self, *, device: str, output_root: Path):
+    def __init__(self, *, device: str, output_root: Path, library: Optional[Library] = None):
         self.device = device
         self.output_root = output_root
+        self.library = library
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._jobs: dict[str, Job] = {}
         self._job_order: list[str] = []
         self._selections: dict[str, tuple[TitleSelection, EncoderMode, str, bool]] = {}
+        self._records: dict[str, RipRecord] = {}
         self._subscribers: dict[str, list[asyncio.Queue[Job]]] = {}
         self._current_process: Optional[asyncio.subprocess.Process] = None
         self._current_job_id: Optional[str] = None
@@ -114,6 +120,18 @@ class Ripper:
         self._job_order.append(job_id)
         self._selections[job_id] = (selection, encoder_mode, str(output_path), burn_forced)
         self._subscribers[job_id] = []
+        self._records[job_id] = RipRecord(
+            content_type=content_type,
+            title=(movie.title if content_type is ContentType.MOVIE else tv.show),  # type: ignore[union-attr]
+            year=(movie.year if movie else None),
+            season=(tv.season if tv else None),
+            episode=(selection.episode_number if content_type is ContentType.TV else None),
+            tmdb_id=(movie.tmdb_id if movie else (tv.tmdb_id if tv else None)),
+            output_path=str(output_path),
+            encoder_mode=encoder_mode,
+            burn_forced=burn_forced,
+            status=JobStatus.QUEUED,
+        )
         self._queue.put_nowait(job_id)
         self._trim_finished()
         return job
@@ -171,6 +189,7 @@ class Ripper:
             except Exception as exc:
                 log.exception("Unhandled error in rip job %s", job_id)
                 self._update(job_id, status=JobStatus.FAILED, error=str(exc))
+                self._save_record(job_id, JobStatus.FAILED, error=str(exc))
 
     async def _run_job(self, job_id: str) -> None:
         selection, encoder_mode, output_path, burn_forced = self._selections[job_id]
@@ -185,6 +204,7 @@ class Ripper:
         )
         log.info("starting rip job %s: %s", job_id, shlex.join(args))
         self._update(job_id, status=JobStatus.RUNNING, percent=0.0)
+        started = time.monotonic()
 
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -203,19 +223,23 @@ class Ripper:
             self._current_process = None
             self._current_job_id = None
 
+        elapsed = int(time.monotonic() - started)
         if rc == 0:
             self._update(job_id, status=JobStatus.DONE, percent=100.0)
+            self._save_record(job_id, JobStatus.DONE, rip_seconds=elapsed)
         else:
             cancelled = rc < 0 or self._jobs[job_id].status == JobStatus.CANCELLED
             _cleanup_partial(output_path)
             if cancelled:
                 self._update(job_id, status=JobStatus.CANCELLED)
+                self._save_record(job_id, JobStatus.CANCELLED)
             else:
                 detail = "\n".join(tail).strip()
                 message = f"HandBrakeCLI exited with code {rc}"
                 if detail:
                     message += f"\n{detail}"
                 self._update(job_id, status=JobStatus.FAILED, error=message)
+                self._save_record(job_id, JobStatus.FAILED, error=message)
 
     async def _consume_progress(
         self,
@@ -271,6 +295,33 @@ class Ripper:
             )
         self._update(job_id, percent=pct, fps=fps, eta_seconds=eta)
 
+    def _save_record(
+        self,
+        job_id: str,
+        status: JobStatus,
+        *,
+        rip_seconds: Optional[int] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Persist a finished job to the library. Best-effort: never crash the worker."""
+        if self.library is None:
+            return
+        record = self._records.get(job_id)
+        if record is None:
+            return
+        record.status = status
+        record.error = error
+        record.rip_seconds = rip_seconds
+        if status is JobStatus.DONE:
+            try:
+                record.file_size_bytes = os.path.getsize(record.output_path)
+            except OSError:
+                record.file_size_bytes = None
+        try:
+            self.library.record_rip(record)
+        except Exception:
+            log.exception("failed to record rip %s to library", job_id)
+
     def _update(self, job_id: str, **fields: object) -> None:
         job = self._jobs.get(job_id)
         if not job:
@@ -293,6 +344,7 @@ class Ripper:
         for jid in finished[:excess]:
             self._jobs.pop(jid, None)
             self._selections.pop(jid, None)
+            self._records.pop(jid, None)
             self._subscribers.pop(jid, None)
             try:
                 self._job_order.remove(jid)
