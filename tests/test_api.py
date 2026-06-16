@@ -192,3 +192,34 @@ def test_recorded_rip_appears_via_api(client):
     chk = client.get("/api/library/check",
                      params={"content_type": "movie", "title": "Top Gun", "year": 1986})
     assert len(chk.json()["matches"]) == 1
+
+
+def test_scan_reports_bluray_when_detected(client):
+    from app.models import ScanResult, Title
+    bd = ScanResult(dvd_label="BLURAY", disc_format="bluray", titles=[
+        Title(index=0, duration_seconds=6000, chapter_count=12,
+              frame_width=1920, frame_height=1080)])
+
+    async def fake_detect(device, **kw):
+        return bd
+
+    with patch("app.main.bluray_detect_and_scan", side_effect=fake_detect):
+        res = client.get("/api/scan")
+    assert res.status_code == 200
+    assert res.json()["disc_format"] == "bluray"
+
+
+def test_scan_falls_back_to_dvd(client):
+    async def fake_detect(device, **kw):
+        return None
+    from app.models import ScanResult
+
+    async def fake_dvd(device):
+        return ScanResult(dvd_label="A_DVD", titles=[])
+
+    with patch("app.main.bluray_detect_and_scan", side_effect=fake_detect), \
+         patch("app.main.scan", side_effect=fake_dvd):
+        res = client.get("/api/scan")
+    assert res.status_code == 200
+    assert res.json()["disc_format"] == "dvd"
+    assert res.json()["dvd_label"] == "A_DVD"
