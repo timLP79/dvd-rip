@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DVD Rip — Library</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand-title">DVD Rip</h1>
+    <nav class="topbar-meta">
+      <a class="nav-link" href="/">Rip</a>
+      <a class="nav-link active" href="/library">Library</a>
+    </nav>
+    <div class="topbar-actions">
+      <label class="opt"><input type="checkbox" id="show-failed" /> <span>Show failed/cancelled</span></label>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="section-head"><h2>Library</h2><span id="lib-count" class="rip-status"></span></div>
+      <table class="titles">
+        <thead>
+          <tr><th>Title</th><th>Ripped</th><th>Size</th><th>Encoder</th><th>Status</th></tr>
+        </thead>
+        <tbody id="library-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/library.js?v={{ asset_version }}"></script>
+</body>
+</html>

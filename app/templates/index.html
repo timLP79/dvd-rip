@@ -13,6 +13,8 @@
   <header class="topbar">
     <h1 class="brand-title">DVD Rip</h1>
     <div class="topbar-meta">
+      <a class="nav-link active" href="/">Rip</a>
+      <a class="nav-link" href="/library">Library</a>
       <span class="meta-cell"><span class="meta-label">Device</span> <code>{{ device }}</code></span>
       <span class="meta-cell"><span class="meta-label">Output</span> <code>{{ output_root }}</code></span>
       <span class="meta-cell"><span class="meta-label">TMDB</span> <code id="tmdb-status" class="tmdb-{{ 'on' if tmdb_enabled else 'off' }}">{{ 'enabled' if tmdb_enabled else 'disabled' }}</code></span>
@@ -86,6 +88,8 @@
         </thead>
         <tbody id="titles-body"></tbody>
       </table>
+      <div id="dup-warning" class="dup-warning" hidden></div>
+
       <div class="rip-options">
         <label class="opt">
           <input type="checkbox" id="burn-forced" checked />

@@ -728,3 +728,25 @@ button.secondary:hover:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+
+.nav-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+.nav-link:hover { color: var(--text); }
+.nav-link.active { color: var(--text-strong); border-bottom-color: var(--accent); }
+.row-muted td { color: var(--text-faint); }
+
+.dup-warning {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(217, 156, 58, 0.10);
+  border: 1px solid rgba(217, 156, 58, 0.4);
+  border-left: 2px solid var(--warning);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+}

@@ -91,6 +91,13 @@ async def index(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/library", response_class=HTMLResponse)
+async def library_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "library.html", {"asset_version": ASSET_VERSION}
+    )
+
+
 @app.get("/api/scan", response_model=ScanResult)
 async def api_scan() -> ScanResult:
     return await scan(DVD_DEVICE)

@@ -239,6 +239,28 @@ function applyManual() {
   updateRipButton();
 }
 
+async function checkDuplicate() {
+  const el = $('#dup-warning');
+  el.hidden = true;
+  if (!state.selectedMeta || state.selectedMeta.type !== 'movie') return;
+  const m = state.selectedMeta;
+  const params = new URLSearchParams({ content_type: 'movie' });
+  if (m.tmdb_id) params.set('tmdb_id', m.tmdb_id);
+  params.set('title', m.title);
+  if (m.year) params.set('year', m.year);
+  try {
+    const res = await fetch(`/api/library/check?${params.toString()}`);
+    if (!res.ok) return;
+    const { matches } = await res.json();
+    if (matches && matches.length) {
+      const when = (matches[0].created_at || '').slice(0, 10);
+      const y = m.year ? ` (${m.year})` : '';
+      el.textContent = `⚠ Already ripped: ${m.title}${y} — ${when}. You can still rip it again.`;
+      el.hidden = false;
+    }
+  } catch (_) { /* advisory only */ }
+}
+
 function paintSelectedMeta() {
   const el = $('#meta-selected');
   if (!state.selectedMeta) {
@@ -260,6 +282,7 @@ function paintSelectedMeta() {
   change.addEventListener('click', () => {
     state.selectedMeta = null;
     el.hidden = true;
+    $('#dup-warning').hidden = true;
     $('#search-results').hidden = true;
     $('#meta-manual').hidden = false;
     renderTitleAssignments();
@@ -270,6 +293,7 @@ function paintSelectedMeta() {
   el.hidden = false;
   $('#search-results').hidden = true;
   $('#meta-manual').hidden = true;
+  checkDuplicate();
 }
 
 async function loadTVEpisodes(tvId, season) {
