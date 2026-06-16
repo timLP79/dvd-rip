@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # --- MakeMKV (built from source; CLI only, no Qt GUI) ---
-ARG MAKEMKV_VERSION=1.18.3
+ARG MAKEMKV_VERSION=1.18.4
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config wget ca-certificates \
         libc6-dev libssl-dev libexpat1-dev zlib1g-dev \
