@@ -10,5 +10,6 @@ __pycache__/
 .venv/
 venv/
 output/
+data/
 *.egg-info/
 .env
