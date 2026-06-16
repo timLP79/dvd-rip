@@ -91,3 +91,9 @@ def test_detect_and_scan_returns_none_on_makemkv_error():
     async def fake_run(cmd, timeout=0):
         return 1, "", "key expired"
     assert asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run)) is None
+
+
+def test_detect_and_scan_none_when_bluray_text_but_no_titles():
+    async def fake_run(cmd, timeout=0):
+        return 0, 'CINFO:1,6209,"Blu-ray disc"\nTCOUNT:0', ""
+    assert asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run)) is None
