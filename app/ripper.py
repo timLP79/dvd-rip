@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import time
 from collections import deque
 from pathlib import Path
@@ -33,6 +34,7 @@ from .models import (
 from .library import Library
 from .paths import movie_path, tv_episode_path, unique_path
 from .presets import build_handbrake_args
+from . import bluray
 
 log = logging.getLogger(__name__)
 
@@ -49,19 +51,22 @@ _MAX_FINISHED_JOBS = 50
 class Ripper:
     """Owns the job queue, the worker task, and progress fanout."""
 
-    def __init__(self, *, device: str, output_root: Path, library: Optional[Library] = None):
+    def __init__(self, *, device: str, output_root: Path, library: Optional[Library] = None,
+                 scratch_dir: str = "/data/scratch"):
         self.device = device
         self.output_root = output_root
         self.library = library
+        self.scratch_dir = scratch_dir
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._jobs: dict[str, Job] = {}
         self._job_order: list[str] = []
-        self._selections: dict[str, tuple[TitleSelection, EncoderMode, str, bool]] = {}
+        self._selections: dict[str, tuple[TitleSelection, EncoderMode, str, bool, str]] = {}
         self._records: dict[str, RipRecord] = {}
         self._subscribers: dict[str, list[asyncio.Queue[Job]]] = {}
         self._current_process: Optional[asyncio.subprocess.Process] = None
         self._current_job_id: Optional[str] = None
         self._worker_task: Optional[asyncio.Task[None]] = None
+        self._cancelling: set[str] = set()
 
     async def start(self) -> None:
         if self._worker_task is None or self._worker_task.done():
@@ -82,6 +87,7 @@ class Ripper:
         encoder_mode: EncoderMode,
         content_type: ContentType,
         burn_forced: bool = True,
+        disc_format: str = "dvd",
         movie: Optional[MovieMetadata] = None,
         tv: Optional[TVMetadata] = None,
     ) -> Job:
@@ -118,7 +124,7 @@ class Ripper:
         )
         self._jobs[job_id] = job
         self._job_order.append(job_id)
-        self._selections[job_id] = (selection, encoder_mode, str(output_path), burn_forced)
+        self._selections[job_id] = (selection, encoder_mode, str(output_path), burn_forced, disc_format)
         self._subscribers[job_id] = []
         self._records[job_id] = RipRecord(
             content_type=content_type,
@@ -130,6 +136,7 @@ class Ripper:
             output_path=str(output_path),
             encoder_mode=encoder_mode,
             burn_forced=burn_forced,
+            disc_format=disc_format,
             status=JobStatus.QUEUED,
         )
         self._queue.put_nowait(job_id)
@@ -149,6 +156,7 @@ class Ripper:
         if job.status in (JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED):
             return False
         if job_id == self._current_job_id and self._current_process is not None:
+            self._cancelling.add(job_id)
             try:
                 self._current_process.terminate()
             except ProcessLookupError:
@@ -192,43 +200,31 @@ class Ripper:
                 self._save_record(job_id, JobStatus.FAILED, error=str(exc))
 
     async def _run_job(self, job_id: str) -> None:
-        selection, encoder_mode, output_path, burn_forced = self._selections[job_id]
-        args = build_handbrake_args(
-            device=self.device,
-            title_index=selection.index,
-            output_path=output_path,
-            audio_tracks=selection.audio_tracks,
-            subtitle_tracks=selection.subtitle_tracks,
-            burn_forced=burn_forced,
-            encoder_mode=encoder_mode,
-        )
-        log.info("starting rip job %s: %s", job_id, shlex.join(args))
-        self._update(job_id, status=JobStatus.RUNNING, percent=0.0)
+        selection, encoder_mode, output_path, burn_forced, disc_format = self._selections[job_id]
         started = time.monotonic()
+        if disc_format == "bluray":
+            await self._run_bluray_job(job_id, selection, encoder_mode, output_path,
+                                       burn_forced, started)
+        else:
+            await self._run_dvd_job(job_id, selection, encoder_mode, output_path,
+                                    burn_forced, started)
 
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        self._current_process = proc
-        self._current_job_id = job_id
+    async def _run_dvd_job(self, job_id: str, selection: TitleSelection, encoder_mode: EncoderMode,
+                           output_path: str, burn_forced: bool, started: float) -> None:
+        log.info("starting DVD rip job %s", job_id)
+        self._update(job_id, status=JobStatus.RUNNING, percent=0.0)
         # Keep the last N non-progress output lines so a failure can report WHY
         # (CSS decryption error, disk full, no audio track) instead of a bare exit code.
         tail: Deque[str] = deque(maxlen=25)
-        try:
-            await self._consume_progress(job_id, proc, tail)
-            rc = await proc.wait()
-        finally:
-            self._current_process = None
-            self._current_job_id = None
-
+        rc = await self._run_handbrake(
+            job_id, input_file=None, output_path=output_path,
+            selection=selection, encoder_mode=encoder_mode, burn_forced=burn_forced, tail=tail)
         elapsed = int(time.monotonic() - started)
         if rc == 0:
             self._update(job_id, status=JobStatus.DONE, percent=100.0)
             self._save_record(job_id, JobStatus.DONE, rip_seconds=elapsed)
         else:
-            cancelled = rc < 0 or self._jobs[job_id].status == JobStatus.CANCELLED
+            cancelled = rc < 0 or job_id in self._cancelling or self._jobs[job_id].status == JobStatus.CANCELLED
             _cleanup_partial(output_path)
             if cancelled:
                 self._update(job_id, status=JobStatus.CANCELLED)
@@ -240,6 +236,90 @@ class Ripper:
                     message += f"\n{detail}"
                 self._update(job_id, status=JobStatus.FAILED, error=message)
                 self._save_record(job_id, JobStatus.FAILED, error=message)
+        self._cancelling.discard(job_id)
+
+    async def _run_handbrake(self, job_id: str, *, input_file: Optional[str], output_path: str,
+                             selection: TitleSelection, encoder_mode: EncoderMode,
+                             burn_forced: bool, tail: Deque[str]) -> int:
+        args = build_handbrake_args(
+            device=self.device,
+            title_index=selection.index,
+            output_path=output_path,
+            audio_tracks=selection.audio_tracks,
+            subtitle_tracks=selection.subtitle_tracks,
+            burn_forced=burn_forced,
+            encoder_mode=encoder_mode,
+            input_file=input_file,
+        )
+        log.info("handbrake job %s: %s", job_id, shlex.join(args))
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        self._current_process = proc
+        self._current_job_id = job_id
+        try:
+            await self._consume_progress(job_id, proc, tail)
+            return await proc.wait()
+        finally:
+            self._current_process = None
+            self._current_job_id = None
+
+    async def _run_bluray_job(self, job_id: str, selection: TitleSelection,
+                              encoder_mode: EncoderMode, output_path: str,
+                              burn_forced: bool, started: float) -> None:
+        tail: Deque[str] = deque(maxlen=25)
+        mkv_path = None
+        try:
+            # Phase 1: decrypt (makemkvcon). A cancel kills the process, which makes
+            # decrypt_title raise — classify cancel vs genuine failure explicitly.
+            self._update(job_id, status=JobStatus.RUNNING, phase="decrypting", percent=0.0)
+            def _prog(p: float) -> None:
+                self._update(job_id, percent=p)
+            try:
+                mkv_path = await bluray.decrypt_title(
+                    self.device, selection.index, self.scratch_dir,
+                    on_progress=_prog,
+                    register_proc=lambda pr: setattr(self, "_current_process", pr),
+                )
+            except Exception as exc:
+                self._current_process = None
+                self._current_job_id = None
+                _sweep_scratch(self.scratch_dir)
+                if job_id in self._cancelling or self._jobs[job_id].status == JobStatus.CANCELLED:
+                    self._update(job_id, status=JobStatus.CANCELLED, phase=None)
+                    self._save_record(job_id, JobStatus.CANCELLED)
+                else:
+                    msg = _friendly_makemkv_error(str(exc))
+                    self._update(job_id, status=JobStatus.FAILED, phase=None, error=msg)
+                    self._save_record(job_id, JobStatus.FAILED, error=msg)
+                return
+            # Phase 2: encode (HandBrake on the temp MKV)
+            self._update(job_id, phase="encoding", percent=0.0)
+            rc = await self._run_handbrake(
+                job_id, input_file=str(mkv_path), output_path=output_path,
+                selection=selection, encoder_mode=encoder_mode, burn_forced=burn_forced,
+                tail=tail)
+            elapsed = int(time.monotonic() - started)
+            if rc == 0:
+                self._update(job_id, status=JobStatus.DONE, phase=None, percent=100.0)
+                self._save_record(job_id, JobStatus.DONE, rip_seconds=elapsed)
+            else:
+                cancelled = (rc < 0 or job_id in self._cancelling
+                             or self._jobs[job_id].status == JobStatus.CANCELLED)
+                _cleanup_partial(output_path)
+                if cancelled:
+                    self._update(job_id, status=JobStatus.CANCELLED, phase=None)
+                    self._save_record(job_id, JobStatus.CANCELLED)
+                else:
+                    msg = f"HandBrakeCLI exited with code {rc}\n" + "\n".join(tail).strip()
+                    self._update(job_id, status=JobStatus.FAILED, phase=None, error=msg)
+                    self._save_record(job_id, JobStatus.FAILED, error=msg)
+        finally:
+            self._cancelling.discard(job_id)
+            if mkv_path is not None:
+                try:
+                    Path(mkv_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     async def _consume_progress(
         self,
@@ -364,3 +444,22 @@ def _cleanup_partial(path_str: str) -> None:
         Path(path_str).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _sweep_scratch(scratch_dir: str) -> None:
+    """Remove any leftover .mkv files from a failed/cancelled decrypt (single worker,
+    so scratch only ever holds the current job's output)."""
+    try:
+        for mkv in Path(scratch_dir).glob("*.mkv"):
+            mkv.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _friendly_makemkv_error(raw: str) -> str:
+    """Map known makemkvcon failures to actionable messages."""
+    low = raw.lower()
+    if any(k in low for k in ("registration", "evaluation", "expired", "app_key", "key ")):
+        return ("MakeMKV beta key missing or expired — update MAKEMKV_APP_KEY in .env "
+                "(get the current free beta key from the MakeMKV forum) and restart.\n\n" + raw)
+    return raw
