@@ -20,7 +20,7 @@ Common settings target Plex playback:
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from .models import EncoderMode
 
@@ -38,6 +38,7 @@ def build_handbrake_args(
     subtitle_tracks: list[int],
     burn_forced: bool,
     encoder_mode: EncoderMode,
+    input_file: Optional[str] = None,
 ) -> list[str]:
     """Build the HandBrakeCLI argv for a single rip job.
 
@@ -73,8 +74,9 @@ def build_handbrake_args(
 
     args: list[str] = [
         "HandBrakeCLI",
-        "--input", device,
-        "--title", str(title_index),
+        *( ["--input", input_file, "--title", "1"]
+           if input_file is not None
+           else ["--input", device, "--title", str(title_index)] ),
         "--output", output_path,
         "--format", "av_mp4",
         "--optimize",                 # MP4 faststart
