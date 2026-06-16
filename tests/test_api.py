@@ -11,6 +11,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("OUTPUT_ROOT", str(tmp_path / "output"))
     monkeypatch.setenv("DVD_DEVICE", "/dev/null")
     monkeypatch.setenv("TMDB_API_KEY", "")
+    monkeypatch.setenv("LIBRARY_DB", str(tmp_path / "library.db"))
     from importlib import reload
     from app import main as main_module
     reload(main_module)
@@ -157,3 +158,37 @@ def test_cancel_unknown_job_returns_409(client):
 def test_progress_unknown_job_returns_404(client):
     res = client.get("/api/jobs/nonexistent/progress")
     assert res.status_code == 404
+
+
+def test_library_empty_initially(client):
+    res = client.get("/api/library")
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_library_check_no_match_on_empty(client):
+    res = client.get("/api/library/check", params={
+        "content_type": "movie", "title": "Nothing", "year": 1999})
+    assert res.status_code == 200
+    assert res.json()["matches"] == []
+
+
+def test_recorded_rip_appears_via_api(client):
+    """Write through the Library (same DB the app opened), read back via the API."""
+    import os
+    from app.library import Library
+    from app.models import ContentType, JobStatus, RipRecord
+
+    lib = Library(os.environ["LIBRARY_DB"])
+    lib.record_rip(RipRecord(
+        content_type=ContentType.MOVIE, title="Top Gun", year=1986,
+        output_path="/output/Movies/Top Gun (1986)/Top Gun (1986).mp4",
+        status=JobStatus.DONE, file_size_bytes=123,
+    ))
+
+    rows = client.get("/api/library").json()
+    assert any(r["title"] == "Top Gun" for r in rows)
+
+    chk = client.get("/api/library/check",
+                     params={"content_type": "movie", "title": "Top Gun", "year": 1986})
+    assert len(chk.json()["matches"]) == 1
