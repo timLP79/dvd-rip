@@ -98,7 +98,8 @@ Module map (all in `app/`):
 | `presets.py` | HandBrake argv builders for Quality (x264 CPU) and Speed (NVENC H.264) modes |
 | `paths.py` | Plex-compliant output paths (`Movies/Title (Year)/…`, `TV Shows/Show/Season NN/Show SNNeNN.mp4`) |
 | `tmdb.py` | Async TMDB client (search movie/tv, season-episode list) — optional, gated on `TMDB_API_KEY` |
-| `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out |
+| `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out; records each terminal job to the library |
+| `library.py` | SQLite rip ledger — `record_rip`/`list_rips`/`find_existing` + `/output` backfill (the only module that touches SQL) |
 | `models.py` | Pydantic models shared across API and worker |
 | `static/`, `templates/` | UI (no build step — Jinja2 + vanilla JS + IBM Plex Sans/Mono fonts) |
 
@@ -108,6 +109,7 @@ Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`)
 - Apt: `handbrake-cli`, `libdvd-pkg` (builds `libdvdcss2` at install time), `libdvdread8t64`, `libdvdnav4`, `lsdvd`, `gosu`, `python3.12`
 - Entrypoint creates an `app` user with the host-supplied PUID/PGID, joins the cdrom group, chowns `/output`, and `gosu`-drops to that user before launching uvicorn — so PID 1 inside the container runs as your host UID.
 - `docker-compose.yml` device-mounts `/dev/sr0` and adds `group_add: ${CDROM_GID:-24}` for drive read access.
+- A `./data:/data` volume holds `library.db` (the SQLite rip ledger), kept out of the `/output` media tree so Plex never scans it. Path via `LIBRARY_DB`.
 
 ## Conventions & Patterns
 

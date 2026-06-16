@@ -110,10 +110,22 @@ To enable:
 | `PGID`        | `1000`        | GID to run the app as (auto-set by `make` to `id -g`) |
 | `CDROM_GID`   | `24`          | Host's cdrom group GID (auto-set by `make` from `getent group cdrom`) |
 | `TMDB_API_KEY`| _(unset)_     | Optional: TMDB v3 API key for in-UI title/episode lookup |
+| `LIBRARY_DB`  | `/data/library.db` | SQLite rip ledger; persisted via the `./data:/data` mount |
 | `LOG_LEVEL`   | `INFO`        | `DEBUG` for verbose HandBrake stdout        |
 
 The compose file maps `${DVD_DEVICE:-/dev/sr0}` from host to `/dev/sr0` inside the container,
-and `${OUTPUT_DIR:-./output}` to `/output`.
+`${OUTPUT_DIR:-./output}` to `/output`, and `./data` to `/data` (the rip ledger).
+
+## Library
+
+The app keeps a persistent record of every rip in `./data/library.db` (SQLite):
+
+- **Library page** (`/library`) — everything you've ripped, newest first, with a
+  toggle to show failed/cancelled attempts.
+- **Duplicate warning** — when you pick a movie you've already ripped, the rip page
+  warns you. It never blocks — you can always re-rip (e.g. from a better disc).
+- **Backfill** — on first start, existing files under `./output` are imported so the
+  catalog and duplicate check work immediately.
 
 ## User and file permissions
 
