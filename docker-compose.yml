@@ -6,6 +6,10 @@ services:
       - "8000:8000"
     devices:
       - "${DVD_DEVICE:-/dev/sr0}:/dev/sr0"
+      # MakeMKV (Blu-ray) reads the drive through its SCSI-generic node, not /dev/sr0.
+      # Map the host's matching /dev/sgN. Find it with:
+      #   ls /sys/block/sr0/device/scsi_generic/
+      - "${BD_SG_DEVICE:-/dev/sg1}:/dev/sg1"
     volumes:
       - "${OUTPUT_DIR:-./output}:/output"
       - "${DATA_DIR:-./data}:/data"
