@@ -39,7 +39,8 @@ ENV DVD_DEVICE=/dev/sr0 \
     PUID=1000 \
     PGID=1000 \
     CDROM_GID=24 \
-    TMDB_API_KEY=""
+    TMDB_API_KEY="" \
+    LIBRARY_DB=/data/library.db
 
 EXPOSE 8000
 

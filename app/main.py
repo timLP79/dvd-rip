@@ -7,7 +7,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -16,9 +16,11 @@ from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
 from .dvd import scan
+from .library import Library
 from .models import (
     ContentType,
     Job,
+    RipRecord,
     RipRequest,
     ScanResult,
     TMDBEpisode,
@@ -35,6 +37,7 @@ logging.basicConfig(
 
 DVD_DEVICE = os.getenv("DVD_DEVICE", "/dev/sr0")
 OUTPUT_ROOT = Path(os.getenv("OUTPUT_ROOT", "/output"))
+LIBRARY_DB = os.getenv("LIBRARY_DB", "/data/library.db")
 
 # Per-process token appended to static asset URLs so each container start busts
 # any browser cache. New container → new token → forced refetch of JS/CSS.
@@ -50,11 +53,18 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT)
+    library = Library(LIBRARY_DB)
+    library.init_db()
+    try:
+        library.backfill(str(OUTPUT_ROOT))
+    except Exception:
+        logging.getLogger(__name__).exception("library backfill failed")
+    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT, library=library)
     await ripper.start()
     tmdb = TMDBClient()
     app.state.ripper = ripper
     app.state.tmdb = tmdb
+    app.state.library = library
     try:
         yield
     finally:
@@ -78,6 +88,13 @@ async def index(request: Request) -> HTMLResponse:
             "tmdb_enabled": tmdb.enabled,
             "asset_version": ASSET_VERSION,
         },
+    )
+
+
+@app.get("/library", response_class=HTMLResponse)
+async def library_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "library.html", {"asset_version": ASSET_VERSION}
     )
 
 
@@ -138,6 +155,30 @@ async def api_rip(payload: RipRequest, request: Request) -> dict:
         )
         job_ids.append(job.id)
     return {"job_ids": job_ids}
+
+
+@app.get("/api/library", response_model=list[RipRecord])
+async def api_library(request: Request, include_unsuccessful: bool = False) -> list[RipRecord]:
+    library: Library = request.app.state.library
+    return library.list_rips(include_unsuccessful=include_unsuccessful)
+
+
+@app.get("/api/library/check")
+async def api_library_check(
+    request: Request,
+    content_type: Literal["movie", "tv"] = Query(...),
+    tmdb_id: Optional[int] = None,
+    title: Optional[str] = None,
+    year: Optional[int] = None,
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+) -> dict:
+    library: Library = request.app.state.library
+    matches = library.find_existing(
+        content_type=content_type, tmdb_id=tmdb_id, title=title,
+        year=year, season=season, episode=episode,
+    )
+    return {"matches": [m.model_dump() for m in matches]}
 
 
 @app.get("/api/jobs", response_model=list[Job])

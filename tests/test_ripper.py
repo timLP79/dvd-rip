@@ -54,3 +54,34 @@ def test_handle_line_tail_is_bounded():
         ripper._handle_line("nojob", f"log line {i}", tail)
     assert len(tail) == 25
     assert list(tail)[-1] == "log line 99"
+
+
+def test_save_record_persists_to_library(tmp_path):
+    from app.library import Library
+    from app.models import ContentType, JobStatus, RipRecord
+    from app.ripper import Ripper
+
+    lib = Library(str(tmp_path / "lib.db"))
+    lib.init_db()
+    r = Ripper(device="/dev/null", output_root=tmp_path, library=lib)
+    r._records["job1"] = RipRecord(
+        content_type=ContentType.MOVIE, title="Heat", year=1995,
+        output_path=str(tmp_path / "Heat.mp4"), status=JobStatus.QUEUED,
+    )
+    (tmp_path / "Heat.mp4").write_bytes(b"x" * 42)
+    r._save_record("job1", JobStatus.DONE, rip_seconds=120)
+
+    rows = lib.list_rips()
+    assert len(rows) == 1
+    assert rows[0].title == "Heat"
+    assert rows[0].status == JobStatus.DONE
+    assert rows[0].file_size_bytes == 42
+    assert rows[0].rip_seconds == 120
+
+
+def test_save_record_noop_without_library(tmp_path):
+    from app.models import JobStatus
+    from app.ripper import Ripper
+    r = Ripper(device="/dev/null", output_root=tmp_path, library=None)
+    # Should not raise even though there's no library and no record.
+    r._save_record("missing", JobStatus.FAILED, error="x")

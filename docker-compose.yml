@@ -8,9 +8,11 @@ services:
       - "${DVD_DEVICE:-/dev/sr0}:/dev/sr0"
     volumes:
       - "${OUTPUT_DIR:-./output}:/output"
+      - "${DATA_DIR:-./data}:/data"
     environment:
       DVD_DEVICE: /dev/sr0
       OUTPUT_ROOT: /output
+      LIBRARY_DB: /data/library.db
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
       CDROM_GID: "${CDROM_GID:-24}"

@@ -56,6 +56,8 @@ usermod -a -G "$cdrom_group_name" app
 # Make sure output dir and /app are writable by the dropped user.
 mkdir -p "${OUTPUT_ROOT:-/output}"
 chown -R "$PUID:$PGID" "${OUTPUT_ROOT:-/output}" 2>/dev/null || true
+mkdir -p "$(dirname "${LIBRARY_DB:-/data/library.db}")"
+chown -R "$PUID:$PGID" "$(dirname "${LIBRARY_DB:-/data/library.db}")" 2>/dev/null || true
 
 echo "[entrypoint] running as uid=$PUID gid=$PGID (cdrom gid=$CDROM_GID)"
 exec gosu app "$@"
