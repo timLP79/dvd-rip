@@ -66,3 +66,28 @@ def test_parse_makemkv_progress():
     assert parse_makemkv_progress("not a progress line") is None
     # guard against divide-by-zero
     assert parse_makemkv_progress("PRGV:5,5,0") == 0.0
+
+
+import asyncio
+from app.bluray import detect_and_scan, decrypt_title
+
+
+def test_detect_and_scan_returns_scanresult_for_bd():
+    async def fake_run(cmd, timeout=0):
+        return 0, SAMPLE_INFO, ""
+    result = asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run))
+    assert result is not None
+    assert result.disc_format == "bluray"
+    assert len(result.titles) == 2
+
+
+def test_detect_and_scan_returns_none_for_dvd():
+    async def fake_run(cmd, timeout=0):
+        return 0, 'CINFO:1,6206,"DVD disc"\nTCOUNT:1', ""
+    assert asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run)) is None
+
+
+def test_detect_and_scan_returns_none_on_makemkv_error():
+    async def fake_run(cmd, timeout=0):
+        return 1, "", "key expired"
+    assert asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run)) is None
