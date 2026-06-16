@@ -750,3 +750,14 @@ button.secondary:hover:not(:disabled) {
   color: var(--text);
   font-size: 13px;
 }
+
+.disc-badge {
+  margin-left: 10px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--accent-bright);
+  border: 1px solid var(--accent);
+  padding: 1px 8px;
+  border-radius: 999px;
+  vertical-align: 2px;
+}

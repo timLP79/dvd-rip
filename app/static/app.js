@@ -117,6 +117,9 @@ async function scan() {
 
 function renderDiscMeta(scan) {
   $('#disc-label').textContent = scan.dvd_label;
+  const badge = $('#disc-format-badge');
+  badge.textContent = scan.disc_format === 'bluray' ? 'Blu-ray' : 'DVD';
+  badge.hidden = false;
 
   // Parse the label, set search prefill + season + auto-toggle content type.
   const parsed = parseDiscLabel(scan.dvd_label);
@@ -492,6 +495,7 @@ async function startRip() {
     encoder_mode: encoderMode,
     burn_forced_subtitles: $('#burn-forced').checked,
     content_type: state.selectedMeta.type,
+    disc_format: (state.scan && state.scan.disc_format) || 'dvd',
     titles: selections,
   };
   if (state.selectedMeta.type === 'movie') {
@@ -558,6 +562,7 @@ function updateJob(li, job) {
   statusEl.textContent = job.status;
   $('.progress-bar', li).style.width = `${Math.max(0, Math.min(100, job.percent || 0))}%`;
   const meta = [];
+  if (job.phase) meta.push(job.phase === 'decrypting' ? 'Decrypting' : 'Encoding');
   if (job.percent != null) meta.push(`${(job.percent).toFixed(1)}%`);
   if (job.fps != null) meta.push(`${job.fps.toFixed(1)} fps`);
   if (job.eta_seconds != null) meta.push(fmtEta(job.eta_seconds));
