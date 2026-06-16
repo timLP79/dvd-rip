@@ -93,3 +93,38 @@ def test_find_existing_ignores_failed_and_other_type(tmp_path):
     lib = _lib(tmp_path)
     lib.record_rip(_movie(title="Dune", year=2021, status=JobStatus.FAILED))
     assert lib.find_existing(content_type=ContentType.MOVIE, title="Dune", year=2021) == []
+
+
+def test_backfill_parses_movie_and_tv(tmp_path):
+    out = tmp_path / "output"
+    movie = out / "Movies" / "Open Range (2003)" / "Open Range (2003).mp4"
+    tv = out / "TV Shows" / "Deadwood" / "Season 01" / "Deadwood S01E03.mp4"
+    for f in (movie, tv):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x" * 10)
+
+    lib = _lib(tmp_path)
+    added = lib.backfill(str(out))
+    assert added == 2
+
+    rows = {r.title: r for r in lib.list_rips()}
+    assert rows["Open Range"].year == 2003
+    assert rows["Open Range"].source == "backfill"
+    assert rows["Open Range"].file_size_bytes == 10
+    assert rows["Deadwood"].season == 1 and rows["Deadwood"].episode == 3
+
+
+def test_backfill_is_idempotent(tmp_path):
+    out = tmp_path / "output"
+    movie = out / "Movies" / "Top Gun (1986)" / "Top Gun (1986).mp4"
+    movie.parent.mkdir(parents=True, exist_ok=True)
+    movie.write_bytes(b"x")
+    lib = _lib(tmp_path)
+    assert lib.backfill(str(out)) == 1
+    assert lib.backfill(str(out)) == 0
+    assert len(lib.list_rips()) == 1
+
+
+def test_backfill_missing_dir_is_noop(tmp_path):
+    lib = _lib(tmp_path)
+    assert lib.backfill(str(tmp_path / "nope")) == 0
