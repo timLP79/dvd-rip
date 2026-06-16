@@ -135,3 +135,23 @@ class Job(BaseModel):
     fps: Optional[float] = None
     eta_seconds: Optional[int] = None
     error: Optional[str] = None
+
+
+class RipRecord(BaseModel):
+    """A persisted rip ledger entry. Mirrors the `rips` SQLite table."""
+    id: Optional[int] = None
+    created_at: Optional[str] = None          # ISO-8601; set at record time if None
+    content_type: ContentType
+    title: str                                 # movie title OR show name
+    year: Optional[int] = None
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    tmdb_id: Optional[int] = None
+    output_path: str
+    encoder_mode: Optional[EncoderMode] = None
+    burn_forced: bool = True
+    file_size_bytes: Optional[int] = None
+    rip_seconds: Optional[int] = None
+    status: JobStatus = JobStatus.DONE
+    error: Optional[str] = None
+    source: str = "rip"                        # "rip" | "backfill"
