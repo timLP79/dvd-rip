@@ -1,0 +1,228 @@
+"""MakeMKV front-end: detect Blu-ray discs, list titles, decrypt a title to MKV.
+
+The only module that touches `makemkvcon`. Robot-mode (-r) output is parsed into
+the same `Title`/`ScanResult` models the DVD path uses, so the UI is uniform.
+
+NOTE: the robot output format + attribute codes here follow MakeMKV's documented
+`-r` protocol. Validate against real `makemkvcon -r info` output on a real disc.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional
+
+from .models import AudioTrack, ScanResult, SubtitleTrack, Title
+
+log = logging.getLogger(__name__)
+
+# MakeMKV ap_ItemAttributeId codes used here (from apdefs.h):
+_ATTR_NAME = 2
+_ATTR_LANG_CODE = 3
+_ATTR_LANG_NAME = 4
+_ATTR_CODEC_LONG = 7
+_ATTR_CHAPTER_COUNT = 8
+_ATTR_DURATION = 9
+_ATTR_VIDEO_SIZE = 19
+
+_MAIN_FEATURE_MIN_SECONDS = 20 * 60
+
+
+def is_bluray_output(robot_output: str) -> bool:
+    """True if `makemkvcon info` output describes a Blu-ray disc."""
+    return bool(re.search(r"blu-?ray", robot_output, re.IGNORECASE))
+
+
+def _duration_to_seconds(value: str) -> int:
+    parts = value.strip().split(":")
+    if not all(p.isdigit() for p in parts) or not parts:
+        return 0
+    parts = [int(p) for p in parts]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    h, m, s = parts[-3], parts[-2], parts[-1]
+    return h * 3600 + m * 60 + s
+
+
+def parse_makemkv_progress(line: str) -> Optional[float]:
+    """Parse a `PRGV:current,total,max` line into 0-100 percent (uses `total`)."""
+    m = re.match(r"PRGV:(\d+),(\d+),(\d+)", line.strip())
+    if not m:
+        return None
+    _current, total, pmax = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if pmax <= 0:
+        return 0.0
+    return round(total / pmax * 100.0, 1)
+
+
+@dataclass
+class _TitleAcc:
+    index: int
+    duration_seconds: int = 0
+    chapter_count: int = 0
+    frame_width: int = 0
+    frame_height: int = 0
+    audio: list = None
+    subs: list = None
+    def __post_init__(self):
+        self.audio = []
+        self.subs = []
+
+
+def parse_makemkv_info(robot_output: str) -> list[Title]:
+    """Parse robot `info` output (TINFO/SINFO lines) into Title models."""
+    titles: dict[int, _TitleAcc] = {}
+    # stream type accumulator: (title, stream) -> {"kind","lang_code","lang_name","codec"}
+    streams: dict[tuple, dict] = {}
+
+    tinfo_re = re.compile(r'^TINFO:(\d+),(\d+),\d+,"(.*)"$')
+    sinfo_re = re.compile(r'^SINFO:(\d+),(\d+),(\d+),\d+,"(.*)"$')
+
+    for line in robot_output.splitlines():
+        tm = tinfo_re.match(line)
+        if tm:
+            tid, code, value = int(tm.group(1)), int(tm.group(2)), tm.group(3)
+            acc = titles.setdefault(tid, _TitleAcc(index=tid))
+            if code == _ATTR_DURATION:
+                acc.duration_seconds = _duration_to_seconds(value)
+            elif code == _ATTR_CHAPTER_COUNT and value.isdigit():
+                acc.chapter_count = int(value)
+            continue
+        sm = sinfo_re.match(line)
+        if sm:
+            tid, sid, code, value = (
+                int(sm.group(1)), int(sm.group(2)), int(sm.group(3)), sm.group(4),
+            )
+            titles.setdefault(tid, _TitleAcc(index=tid))
+            st = streams.setdefault((tid, sid), {})
+            if code == 1:  # Type
+                st["kind"] = value  # "Video" / "Audio" / "Subtitles"
+            elif code == _ATTR_LANG_CODE:
+                st["lang_code"] = value
+            elif code == _ATTR_LANG_NAME:
+                st["lang_name"] = value
+            elif code == _ATTR_CODEC_LONG:
+                st["codec"] = value
+            elif code == _ATTR_VIDEO_SIZE:
+                mm = re.match(r"(\d+)x(\d+)", value)
+                if mm:
+                    acc = titles[tid]
+                    acc.frame_width, acc.frame_height = int(mm.group(1)), int(mm.group(2))
+
+    # assemble audio/subtitle tracks per title in stream order
+    for (tid, sid), st in sorted(streams.items()):
+        acc = titles[tid]
+        kind = (st.get("kind") or "").lower()
+        lang = st.get("lang_name") or st.get("lang_code")
+        if kind == "audio":
+            acc.audio.append(AudioTrack(index=len(acc.audio) + 1, language=lang,
+                                        codec=st.get("codec")))
+        elif kind in ("subtitles", "subtitle"):
+            acc.subs.append(SubtitleTrack(index=len(acc.subs) + 1, language=lang))
+
+    out: list[Title] = []
+    for tid in sorted(titles):
+        acc = titles[tid]
+        out.append(Title(
+            index=acc.index,
+            duration_seconds=acc.duration_seconds,
+            chapter_count=acc.chapter_count,
+            frame_width=acc.frame_width,
+            frame_height=acc.frame_height,
+            audio_tracks=acc.audio,
+            subtitle_tracks=acc.subs,
+            is_main_feature=False,
+        ))
+    # flag the longest title over the threshold as the main feature
+    if out:
+        longest = max(out, key=lambda t: t.duration_seconds)
+        if longest.duration_seconds >= _MAIN_FEATURE_MIN_SECONDS:
+            longest.is_main_feature = True
+    return out
+
+
+async def _spawn(cmd: list[str], timeout: float = 180.0) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise
+    return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
+
+
+async def detect_and_scan(
+    device: str,
+    *,
+    _run: Callable = _spawn,
+) -> Optional[ScanResult]:
+    """Run `makemkvcon info`; return a Blu-ray ScanResult, or None to fall back to DVD."""
+    cmd = ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"]
+    try:
+        rc, out, err = await _run(cmd, timeout=180.0)
+    except FileNotFoundError:
+        log.error("makemkvcon not found on PATH")
+        return None
+    except asyncio.TimeoutError:
+        log.error("makemkvcon info timed out for %s", device)
+        return None
+    if rc != 0:
+        log.info("makemkvcon info rc=%s (not a Blu-ray or key issue): %s", rc, err.strip()[:300])
+        return None
+    if not is_bluray_output(out):
+        return None
+    titles = parse_makemkv_info(out)
+    return ScanResult(dvd_label="BLURAY", titles=titles, disc_format="bluray")
+
+
+async def decrypt_title(
+    device: str,
+    title_id: int,
+    scratch_dir: str,
+    *,
+    on_progress: Optional[Callable[[float], None]] = None,
+    register_proc: Optional[Callable] = None,
+) -> Path:
+    """Decrypt one title to an MKV in scratch_dir. Returns the produced .mkv path.
+
+    register_proc(proc) lets the caller (ripper) hold the process for cancellation.
+    Raises RuntimeError on failure (with a tail of makemkvcon output).
+    """
+    Path(scratch_dir).mkdir(parents=True, exist_ok=True)
+    cmd = ["makemkvcon", "-r", "--cache=1", "--progress=-same",
+           "mkv", f"dev:{device}", str(title_id), scratch_dir]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    if register_proc:
+        register_proc(proc)
+    tail: list[str] = []
+    assert proc.stdout is not None
+    while True:
+        raw = await proc.stdout.readline()
+        if not raw:
+            break
+        line = raw.decode(errors="replace").rstrip("\r\n")
+        pct = parse_makemkv_progress(line)
+        if pct is not None:
+            if on_progress:
+                on_progress(pct)
+        elif line:
+            tail.append(line)
+            if len(tail) > 25:
+                tail.pop(0)
+    rc = await proc.wait()
+    if rc != 0:
+        detail = "\n".join(tail).strip()
+        raise RuntimeError(f"makemkvcon exited with code {rc}\n{detail}")
+    mkvs = sorted(Path(scratch_dir).glob("*.mkv"), key=lambda p: p.stat().st_mtime)
+    if not mkvs:
+        raise RuntimeError("makemkvcon produced no .mkv file")
+    return mkvs[-1]
