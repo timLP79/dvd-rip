@@ -100,6 +100,30 @@ To enable:
 (You can also `export TMDB_API_KEY=...` from your shell — that takes precedence over
 `.env` if both are set.)
 
+## Blu-ray
+
+Blu-ray discs are auto-detected at scan time: when a BD is inserted the UI shows a **Blu-ray** badge next to the disc label and the workflow is otherwise identical to DVD.
+
+Ripping a Blu-ray requires two extra things:
+
+1. **A MakeMKV beta key** — MakeMKV is the only tool with a working libre BD decryption
+   stack. The free beta key rotates roughly monthly; get the current value from the sticky
+   post at <https://forum.makemkv.com/forum/viewtopic.php?t=1053>, then add it to `.env`:
+
+   ```bash
+   MAKEMKV_APP_KEY=T-xxxx...     # paste the current key here
+   ```
+
+   Without it, Blu-ray rips fail immediately (DVD path is unaffected).
+
+2. **~40 GB of transient scratch space** under `./data` — the rip runs in two phases:
+   MakeMKV first decrypts the selected title to a temporary MKV in `./data/scratch`,
+   then HandBrake encodes that MKV to the final H.264 MP4. The scratch MKV is deleted
+   once the encode finishes (or is cancelled). Make sure the `./data` volume has enough
+   headroom before starting a Blu-ray rip.
+
+The DVD path is unchanged — no extra config needed for DVD-only use.
+
 ## Configuration
 
 | Env var       | Default       | Notes                                       |
@@ -111,6 +135,8 @@ To enable:
 | `CDROM_GID`   | `24`          | Host's cdrom group GID (auto-set by `make` from `getent group cdrom`) |
 | `TMDB_API_KEY`| _(unset)_     | Optional: TMDB v3 API key for in-UI title/episode lookup |
 | `LIBRARY_DB`  | `/data/library.db` | SQLite rip ledger; persisted via the `./data:/data` mount |
+| `MAKEMKV_APP_KEY` | _(unset)_ | MakeMKV beta key — required for Blu-ray; rotates ~monthly |
+| `MAKEMKV_SCRATCH` | `/data/scratch` | Scratch dir for transient decrypt MKVs (~40 GB needed) |
 | `LOG_LEVEL`   | `INFO`        | `DEBUG` for verbose HandBrake stdout        |
 
 The compose file maps `${DVD_DEVICE:-/dev/sr0}` from host to `/dev/sr0` inside the container,

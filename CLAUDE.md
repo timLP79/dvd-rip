@@ -95,6 +95,7 @@ Module map (all in `app/`):
 |---|---|
 | `main.py` | FastAPI routes (`/api/scan`, `/api/search`, `/api/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
 | `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult` |
+| `bluray.py` | MakeMKV front-end — detect BD, scan titles, decrypt a title to a temp MKV (the only module that touches `makemkvcon`) |
 | `presets.py` | HandBrake argv builders for Quality (x264 CPU) and Speed (NVENC H.264) modes |
 | `paths.py` | Plex-compliant output paths (`Movies/Title (Year)/…`, `TV Shows/Show/Season NN/Show SNNeNN.mp4`) |
 | `tmdb.py` | Async TMDB client (search movie/tv, season-episode list) — optional, gated on `TMDB_API_KEY` |
@@ -110,6 +111,7 @@ Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`)
 - Entrypoint creates an `app` user with the host-supplied PUID/PGID, joins the cdrom group, chowns `/output`, and `gosu`-drops to that user before launching uvicorn — so PID 1 inside the container runs as your host UID.
 - `docker-compose.yml` device-mounts `/dev/sr0` and adds `group_add: ${CDROM_GID:-24}` for drive read access.
 - A `./data:/data` volume holds `library.db` (the SQLite rip ledger), kept out of the `/output` media tree so Plex never scans it. Path via `LIBRARY_DB`.
+- `makemkvcon` is built from source into the image (see `ARG MAKEMKV_VERSION` in the Dockerfile). Blu-ray rips require `MAKEMKV_APP_KEY` in `.env` — the free MakeMKV beta key, which rotates roughly monthly (get the current value from the MakeMKV forum). The entrypoint writes the key into the `app` user's `~/.MakeMKV/settings.conf` at startup. Transient MKV scratch files land under `MAKEMKV_SCRATCH` (default `/data/scratch`; needs ~40 GB free during a rip) and are cleaned up after each job.
 
 ## Conventions & Patterns
 
