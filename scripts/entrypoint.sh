@@ -59,5 +59,15 @@ chown -R "$PUID:$PGID" "${OUTPUT_ROOT:-/output}" 2>/dev/null || true
 mkdir -p "$(dirname "${LIBRARY_DB:-/data/library.db}")"
 chown -R "$PUID:$PGID" "$(dirname "${LIBRARY_DB:-/data/library.db}")" 2>/dev/null || true
 
+SCRATCH="${MAKEMKV_SCRATCH:-/data/scratch}"
+mkdir -p "$SCRATCH" && chown -R "$PUID:$PGID" "$SCRATCH" 2>/dev/null || true
+if [ -n "${MAKEMKV_APP_KEY:-}" ]; then
+    APP_HOME="$(getent passwd "$PUID" | cut -d: -f6)"
+    APP_HOME="${APP_HOME:-/home/app}"
+    mkdir -p "$APP_HOME/.MakeMKV"
+    printf 'app_Key = "%s"\n' "$MAKEMKV_APP_KEY" > "$APP_HOME/.MakeMKV/settings.conf"
+    chown -R "$PUID:$PGID" "$APP_HOME/.MakeMKV" 2>/dev/null || true
+fi
+
 echo "[entrypoint] running as uid=$PUID gid=$PGID (cdrom gid=$CDROM_GID)"
 exec gosu app "$@"
