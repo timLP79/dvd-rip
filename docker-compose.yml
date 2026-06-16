@@ -8,7 +8,7 @@ services:
       - "${DVD_DEVICE:-/dev/sr0}:/dev/sr0"
     volumes:
       - "${OUTPUT_DIR:-./output}:/output"
-      - "./data:/data"
+      - "${DATA_DIR:-./data}:/data"
     environment:
       DVD_DEVICE: /dev/sr0
       OUTPUT_ROOT: /output
