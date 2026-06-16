@@ -129,3 +129,29 @@ def test_bluray_job_runs_two_phases(tmp_path, monkeypatch):
     assert ("decrypt", 0) in calls
     assert any(c[0] == "encode" for c in calls)
     assert r.get(job.id).status == JobStatus.DONE
+
+
+def test_bluray_cancel_during_decrypt_marks_cancelled(tmp_path, monkeypatch):
+    import asyncio
+    from app import bluray
+    from app.library import Library
+    from app.models import ContentType, EncoderMode, JobStatus, MovieMetadata, TitleSelection
+    from app.ripper import Ripper
+
+    lib = Library(str(tmp_path / "lib.db")); lib.init_db()
+    r = Ripper(device="/dev/sr0", output_root=tmp_path, library=lib,
+               scratch_dir=str(tmp_path / "scratch"))
+
+    async def fake_decrypt(device, title_id, scratch_dir, *, on_progress=None, register_proc=None):
+        # simulate cancel(): mark intent + raise as a killed process would
+        r._cancelling.add(job_id_holder["id"])
+        raise RuntimeError("makemkvcon exited with code -15")
+
+    monkeypatch.setattr(bluray, "decrypt_title", fake_decrypt)
+    job = r.enqueue(
+        selection=TitleSelection(index=0, audio_tracks=[1], subtitle_tracks=[], part_index=1),
+        encoder_mode=EncoderMode.QUALITY, content_type=ContentType.MOVIE,
+        disc_format="bluray", movie=MovieMetadata(title="X", year=2020))
+    job_id_holder = {"id": job.id}
+    asyncio.run(r._run_job(job.id))
+    assert r.get(job.id).status == JobStatus.CANCELLED

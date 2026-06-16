@@ -15,7 +15,6 @@ import os
 import re
 import secrets
 import shlex
-import shutil
 import time
 from collections import deque
 from pathlib import Path
@@ -216,27 +215,29 @@ class Ripper:
         # Keep the last N non-progress output lines so a failure can report WHY
         # (CSS decryption error, disk full, no audio track) instead of a bare exit code.
         tail: Deque[str] = deque(maxlen=25)
-        rc = await self._run_handbrake(
-            job_id, input_file=None, output_path=output_path,
-            selection=selection, encoder_mode=encoder_mode, burn_forced=burn_forced, tail=tail)
-        elapsed = int(time.monotonic() - started)
-        if rc == 0:
-            self._update(job_id, status=JobStatus.DONE, percent=100.0)
-            self._save_record(job_id, JobStatus.DONE, rip_seconds=elapsed)
-        else:
-            cancelled = rc < 0 or job_id in self._cancelling or self._jobs[job_id].status == JobStatus.CANCELLED
-            _cleanup_partial(output_path)
-            if cancelled:
-                self._update(job_id, status=JobStatus.CANCELLED)
-                self._save_record(job_id, JobStatus.CANCELLED)
+        try:
+            rc = await self._run_handbrake(
+                job_id, input_file=None, output_path=output_path,
+                selection=selection, encoder_mode=encoder_mode, burn_forced=burn_forced, tail=tail)
+            elapsed = int(time.monotonic() - started)
+            if rc == 0:
+                self._update(job_id, status=JobStatus.DONE, percent=100.0)
+                self._save_record(job_id, JobStatus.DONE, rip_seconds=elapsed)
             else:
-                detail = "\n".join(tail).strip()
-                message = f"HandBrakeCLI exited with code {rc}"
-                if detail:
-                    message += f"\n{detail}"
-                self._update(job_id, status=JobStatus.FAILED, error=message)
-                self._save_record(job_id, JobStatus.FAILED, error=message)
-        self._cancelling.discard(job_id)
+                cancelled = rc < 0 or job_id in self._cancelling or self._jobs[job_id].status == JobStatus.CANCELLED
+                _cleanup_partial(output_path)
+                if cancelled:
+                    self._update(job_id, status=JobStatus.CANCELLED)
+                    self._save_record(job_id, JobStatus.CANCELLED)
+                else:
+                    detail = "\n".join(tail).strip()
+                    message = f"HandBrakeCLI exited with code {rc}"
+                    if detail:
+                        message += f"\n{detail}"
+                    self._update(job_id, status=JobStatus.FAILED, error=message)
+                    self._save_record(job_id, JobStatus.FAILED, error=message)
+        finally:
+            self._cancelling.discard(job_id)
 
     async def _run_handbrake(self, job_id: str, *, input_file: Optional[str], output_path: str,
                              selection: TitleSelection, encoder_mode: EncoderMode,
@@ -274,6 +275,7 @@ class Ripper:
             self._update(job_id, status=JobStatus.RUNNING, phase="decrypting", percent=0.0)
             def _prog(p: float) -> None:
                 self._update(job_id, percent=p)
+            self._current_job_id = job_id
             try:
                 mkv_path = await bluray.decrypt_title(
                     self.device, selection.index, self.scratch_dir,
