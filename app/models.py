@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,7 @@ class Title(BaseModel):
 class ScanResult(BaseModel):
     dvd_label: str
     titles: list[Title]
+    disc_format: Literal["dvd", "bluray"] = "dvd"
 
 
 class MovieMetadata(BaseModel):
@@ -80,6 +81,7 @@ class TitleSelection(BaseModel):
 class RipRequest(BaseModel):
     dvd_label: str
     encoder_mode: EncoderMode = EncoderMode.QUALITY
+    disc_format: Literal["dvd", "bluray"] = "dvd"
     # Run Foreign Audio Search and burn forced/foreign-dialogue subtitles into the
     # picture. Default on for correctness; uncheck for plain-English discs to skip
     # the slow scan pre-pass (selected subtitle tracks are still embedded either way).
@@ -135,6 +137,7 @@ class Job(BaseModel):
     fps: Optional[float] = None
     eta_seconds: Optional[int] = None
     error: Optional[str] = None
+    phase: Optional[str] = None
 
 
 class RipRecord(BaseModel):
@@ -155,3 +158,4 @@ class RipRecord(BaseModel):
     status: JobStatus = JobStatus.DONE
     error: Optional[str] = None
     source: str = "rip"                        # "rip" | "backfill"
+    disc_format: str = "dvd"

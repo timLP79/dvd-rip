@@ -33,6 +33,44 @@ def test_record_and_list_roundtrip(tmp_path):
     assert rows[0].created_at is not None
 
 
+def test_disc_format_roundtrips(tmp_path):
+    lib = _lib(tmp_path)
+    lib.record_rip(_movie(title="A DVD", disc_format="dvd"))
+    lib.record_rip(_movie(title="A BD", disc_format="bluray"))
+    by_title = {r.title: r.disc_format for r in lib.list_rips()}
+    assert by_title["A DVD"] == "dvd"
+    assert by_title["A BD"] == "bluray"
+
+
+def test_disc_format_column_migrates_on_existing_db(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    # Simulate a pre-disc_format DB: create the table without the column.
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """CREATE TABLE rips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
+            content_type TEXT NOT NULL, title TEXT NOT NULL, year INTEGER,
+            season INTEGER, episode INTEGER, tmdb_id INTEGER, output_path TEXT NOT NULL,
+            encoder_mode TEXT, burn_forced INTEGER NOT NULL DEFAULT 1,
+            file_size_bytes INTEGER, rip_seconds INTEGER, status TEXT NOT NULL,
+            error TEXT, source TEXT NOT NULL DEFAULT 'rip');
+        INSERT INTO rips (created_at, content_type, title, output_path, status)
+            VALUES ('2026-01-01T00:00:00+00:00', 'movie', 'Old Movie',
+                    '/output/Movies/Old Movie/Old Movie.mp4', 'done');"""
+    )
+    conn.commit()
+    conn.close()
+
+    lib = Library(str(db))
+    lib.init_db()  # must ALTER the table to add disc_format, defaulting old rows to 'dvd'
+    lib.record_rip(_movie(title="New BD", disc_format="bluray"))
+    by_title = {r.title: r.disc_format for r in lib.list_rips()}
+    assert by_title["Old Movie"] == "dvd"
+    assert by_title["New BD"] == "bluray"
+
+
 def test_list_newest_first(tmp_path):
     lib = _lib(tmp_path)
     lib.record_rip(_movie(title="A", created_at="2026-01-01T00:00:00+00:00"))

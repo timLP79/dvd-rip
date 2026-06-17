@@ -23,6 +23,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && dpkg-reconfigure -f noninteractive libdvd-pkg \
     && rm -rf /var/lib/apt/lists/*
 
+# --- MakeMKV (built from source; CLI only, no Qt GUI) ---
+ARG MAKEMKV_VERSION=1.18.4
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential pkg-config wget ca-certificates \
+        libc6-dev libssl-dev libexpat1-dev zlib1g-dev \
+        libavcodec-dev libavutil-dev libavformat-dev \
+    && cd /tmp \
+    && wget -q "https://www.makemkv.com/download/makemkv-oss-${MAKEMKV_VERSION}.tar.gz" \
+    && wget -q "https://www.makemkv.com/download/makemkv-bin-${MAKEMKV_VERSION}.tar.gz" \
+    && tar xzf makemkv-oss-${MAKEMKV_VERSION}.tar.gz \
+    && tar xzf makemkv-bin-${MAKEMKV_VERSION}.tar.gz \
+    && cd makemkv-oss-${MAKEMKV_VERSION} \
+    && ./configure --disable-gui >/dev/null \
+    && make -j"$(nproc)" >/dev/null && make install \
+    && cd ../makemkv-bin-${MAKEMKV_VERSION} \
+    && mkdir -p tmp && echo accepted > tmp/eula_accepted \
+    && make -j"$(nproc)" >/dev/null && make install \
+    && cd / && rm -rf /tmp/makemkv-* \
+    && apt-get purge -y build-essential pkg-config wget && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -40,7 +61,10 @@ ENV DVD_DEVICE=/dev/sr0 \
     PGID=1000 \
     CDROM_GID=24 \
     TMDB_API_KEY="" \
-    LIBRARY_DB=/data/library.db
+    LIBRARY_DB=/data/library.db \
+    MAKEMKV_APP_KEY="" \
+    MAKEMKV_SCRATCH=/data/scratch \
+    MAKEMKV_SDF_STOP=""
 
 EXPOSE 8000
 

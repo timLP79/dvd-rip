@@ -75,7 +75,9 @@ ${OUTPUT_DIR}/
 ```
 
 Plex auto-stacks `- cd2`, `- cd3`, … into a single movie entry. Show folders omit the
-year (Plex pulls year + episode titles from its own metadata sources).
+year (Plex pulls year + episode titles from its own metadata sources). DVD rips are
+`.mp4`; Blu-ray rips are `.mkv` (see [Blu-ray](#blu-ray) for why) — the naming is
+otherwise identical.
 
 ## TMDB metadata lookup
 
@@ -100,6 +102,66 @@ To enable:
 (You can also `export TMDB_API_KEY=...` from your shell — that takes precedence over
 `.env` if both are set.)
 
+## Blu-ray
+
+Blu-ray discs are auto-detected at scan time: when a BD is inserted the UI shows a **Blu-ray** badge next to the disc label and the workflow is otherwise identical to DVD.
+
+Ripping a Blu-ray requires two extra things:
+
+1. **A MakeMKV beta key** — MakeMKV is the only tool with a working libre BD decryption
+   stack. The free beta key rotates roughly monthly; get the current value from the sticky
+   post at <https://forum.makemkv.com/forum/viewtopic.php?t=1053>, then add it to `.env`:
+
+   ```bash
+   MAKEMKV_APP_KEY=T-xxxx...     # paste the current key here
+   ```
+
+   Without it, Blu-ray rips fail immediately (DVD path is unaffected).
+
+2. **~40 GB of transient scratch space** under `./data` — the rip runs in two phases:
+   MakeMKV first decrypts the selected title to a temporary MKV in `./data/scratch`,
+   then HandBrake encodes that MKV to the final H.264 file. The scratch MKV is deleted
+   once the encode finishes (or is cancelled). Make sure the `./data` volume has enough
+   headroom before starting a Blu-ray rip.
+
+3. **Your drive id in `MAKEMKV_SDF_STOP`** — most non-LibreDrive USB Blu-ray drives on
+   Linux otherwise make `makemkvcon` hang at 100% CPU during "SDF" (drive-firmware)
+   processing. Setting `MAKEMKV_SDF_STOP` runs the drive in standard AACS mode, which
+   reads 1080p Blu-ray fine (LibreDrive is only needed for UHD/4K). To find your id, do
+   one scan attempt, then read the drive id from the log inside the container:
+
+   ```bash
+   docker compose exec dvd-rip grep "SDF auto" /home/app/MakeMKV_log.txt
+   # -> SDF auto v0a5: PIONEER_BD-RW___BDR-XD08_1.00_BHDL000771UC
+   ```
+
+   Copy that id into `.env` and `make restart`:
+
+   ```bash
+   MAKEMKV_SDF_STOP=PIONEER_BD-RW___BDR-XD08_1.00_BHDL000771UC
+   ```
+
+### Blu-ray outputs MKV (not MP4)
+
+Blu-ray rips are written as **`.mkv`**, while DVD rips stay `.mp4`. The reason is
+subtitles: Blu-ray subtitles are **PGS** (bitmap), which an MP4 container can't carry as
+a soft/selectable track — only MKV can. So your disc's English subtitle stays selectable
+(and forced subtitles still burn in), matching the DVD behaviour. Plex Direct Plays MKV
+on the Android app and Direct Streams it to Chromecast (a cheap container rewrap, no video
+re-encode); turning bitmap subtitles **on** triggers a burn-transcode, exactly as it does
+for DVD VOBSUB. Both formats coexist in one Plex library.
+
+> **Note:** Blu-ray scans are slower than DVD — for discs with BD+ copy protection
+> MakeMKV runs a decode pass that "may take up to a few minutes" before titles appear.
+>
+> **MakeMKV servers:** `makemkvcon` is configured to never phone home
+> (`app_UpdateEnable=0` + `MAKEMKV_SDF_STOP`), so rips keep working even while
+> makemkv.com is unreachable. The only effect is that disc-specific BD+ data can't be
+> downloaded; MakeMKV falls back to a built-in generic table, which handles typical
+> 1080p discs.
+
+The DVD path is unchanged — no extra config needed for DVD-only use.
+
 ## Configuration
 
 | Env var       | Default       | Notes                                       |
@@ -111,6 +173,9 @@ To enable:
 | `CDROM_GID`   | `24`          | Host's cdrom group GID (auto-set by `make` from `getent group cdrom`) |
 | `TMDB_API_KEY`| _(unset)_     | Optional: TMDB v3 API key for in-UI title/episode lookup |
 | `LIBRARY_DB`  | `/data/library.db` | SQLite rip ledger; persisted via the `./data:/data` mount |
+| `MAKEMKV_APP_KEY` | _(unset)_ | MakeMKV beta key — required for Blu-ray; rotates ~monthly |
+| `MAKEMKV_SCRATCH` | `/data/scratch` | Scratch dir for transient decrypt MKVs (~40 GB needed) |
+| `MAKEMKV_SDF_STOP` | _(unset)_ | Drive id to run in standard (non-LibreDrive) mode — avoids the 100%-CPU SDF hang on most USB BD drives |
 | `LOG_LEVEL`   | `INFO`        | `DEBUG` for verbose HandBrake stdout        |
 
 The compose file maps `${DVD_DEVICE:-/dev/sr0}` from host to `/dev/sr0` inside the container,

@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS rips (
     rip_seconds INTEGER,
     status TEXT NOT NULL,
     error TEXT,
-    source TEXT NOT NULL DEFAULT 'rip'
+    source TEXT NOT NULL DEFAULT 'rip',
+    disc_format TEXT NOT NULL DEFAULT 'dvd'
 );
 """
 
@@ -66,6 +67,7 @@ def _row_to_record(row: sqlite3.Row) -> RipRecord:
         status=row["status"],
         error=row["error"],
         source=row["source"],
+        disc_format=row["disc_format"],
     )
 
 
@@ -126,6 +128,12 @@ class Library:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            # Migrate older DBs that predate the disc_format column.
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(rips)")}
+            if "disc_format" not in cols:
+                conn.execute(
+                    "ALTER TABLE rips ADD COLUMN disc_format TEXT NOT NULL DEFAULT 'dvd'"
+                )
 
     def record_rip(self, record: RipRecord) -> None:
         ct = record.content_type.value if isinstance(record.content_type, ContentType) else record.content_type
@@ -135,15 +143,15 @@ class Library:
             conn.execute(
                 """INSERT INTO rips (created_at, content_type, title, year, season,
                        episode, tmdb_id, output_path, encoder_mode, burn_forced,
-                       file_size_bytes, rip_seconds, status, error, source)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       file_size_bytes, rip_seconds, status, error, source, disc_format)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     record.created_at or _now_iso(),
                     ct, record.title, record.year, record.season, record.episode,
                     record.tmdb_id, record.output_path, enc,
                     1 if record.burn_forced else 0,
                     record.file_size_bytes, record.rip_seconds, status,
-                    record.error, record.source,
+                    record.error, record.source, record.disc_format,
                 ),
             )
 
@@ -210,13 +218,16 @@ class Library:
             return 0
         existing = self._existing_paths()
         added = 0
-        for mp4 in sorted(root.rglob("*.mp4")):
+        media = sorted(p for ext in ("*.mp4", "*.mkv") for p in root.rglob(ext))
+        for mp4 in media:
             if str(mp4) in existing:
                 continue
             record = parse_output_path(mp4, root)
             if record is None:
                 log.debug("backfill: could not parse %s", mp4)
                 continue
+            # Infer disc_format from the container (BD rips are .mkv).
+            record.disc_format = "bluray" if mp4.suffix.lower() == ".mkv" else "dvd"
             try:
                 record.file_size_bytes = mp4.stat().st_size
             except OSError:

@@ -110,3 +110,42 @@ def test_empty_audio_defaults_to_track_one():
     # Defaults to track 1, still doubled into stereo + passthrough.
     assert pairs["--audio"] == "1,1"
     assert pairs["--aencoder"] == "ca_aac,copy"
+
+
+def test_mkv_input_uses_file_not_device():
+    args = build_handbrake_args(
+        device="/dev/sr0",
+        title_index=7,
+        output_path="/o.mp4",
+        audio_tracks=[1],
+        subtitle_tracks=[],
+        burn_forced=True,
+        encoder_mode=EncoderMode.QUALITY,
+        input_file="/data/scratch/title.mkv",
+    )
+    pairs = _args_to_pairs(args)
+    # MKV input overrides the device + title number (MKV has a single title).
+    assert pairs["--input"] == "/data/scratch/title.mkv"
+    assert pairs["--title"] == "1"
+    assert "/dev/sr0" not in args
+
+
+def test_mp4_output_uses_av_mp4_with_faststart():
+    args = _build(output_path="/out/Movie.mp4", subtitle_tracks=[1], burn_forced=False)
+    assert _args_to_pairs(args)["--format"] == "av_mp4"
+    assert "--optimize" in args
+
+
+def test_mkv_output_uses_av_mkv_and_no_optimize():
+    # Blu-ray path: .mkv output -> av_mkv container, faststart dropped, PGS subs
+    # still soft-muxed so they ride along selectable.
+    args = build_handbrake_args(
+        device="/dev/sr0", title_index=1, output_path="/out/Movie.mkv",
+        audio_tracks=[1], subtitle_tracks=[1], burn_forced=True,
+        encoder_mode=EncoderMode.QUALITY, input_file="/data/scratch/t.mkv",
+    )
+    pairs = _args_to_pairs(args)
+    assert pairs["--format"] == "av_mkv"
+    assert "--optimize" not in args         # MP4-only
+    assert pairs["--subtitle"] == "scan,1"  # forced burn + soft English embed
+    assert pairs["--subtitle-burned"] == "scan"

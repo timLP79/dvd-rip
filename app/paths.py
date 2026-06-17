@@ -43,18 +43,20 @@ def movie_path(
     title: str,
     year: Optional[int],
     part_index: Optional[int] = None,
+    ext: str = "mp4",
 ) -> Path:
     """Build the path for a movie rip.
 
     `part_index` is 1-based. None or 1 produces the main filename; 2+ produces
     a `- cd<N>` suffix that Plex auto-stacks into a single movie entry.
+    `ext` is the container extension (`mp4` for DVD, `mkv` for Blu-ray).
     """
     title_clean = sanitize(title)
     name = f"{title_clean} ({year})" if year else title_clean
     folder = output_root / "Movies" / name
     if part_index is None or part_index == 1:
-        return folder / f"{name}.mp4"
-    return folder / f"{name} - cd{part_index}.mp4"
+        return folder / f"{name}.{ext}"
+    return folder / f"{name} - cd{part_index}.{ext}"
 
 
 def tv_episode_path(
@@ -63,15 +65,17 @@ def tv_episode_path(
     show: str,
     season: int,
     episode: int,
+    ext: str = "mp4",
 ) -> Path:
     """Build the path for a TV episode rip.
 
     Matches the user's existing convention: no year on the show folder, no
-    episode title in the filename, uppercase SxxExx.
+    episode title in the filename, uppercase SxxExx. `ext` is the container
+    extension (`mp4` for DVD, `mkv` for Blu-ray).
     """
     show_clean = sanitize(show)
     folder = output_root / "TV Shows" / show_clean / f"Season {season:02d}"
-    filename = f"{show_clean} S{season:02d}E{episode:02d}.mp4"
+    filename = f"{show_clean} S{season:02d}E{episode:02d}.{ext}"
     return folder / filename
 
 

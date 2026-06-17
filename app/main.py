@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
+from .bluray import detect_and_scan as bluray_detect_and_scan
 from .dvd import scan
 from .library import Library
 from .models import (
@@ -38,6 +39,7 @@ logging.basicConfig(
 DVD_DEVICE = os.getenv("DVD_DEVICE", "/dev/sr0")
 OUTPUT_ROOT = Path(os.getenv("OUTPUT_ROOT", "/output"))
 LIBRARY_DB = os.getenv("LIBRARY_DB", "/data/library.db")
+MAKEMKV_SCRATCH = os.getenv("MAKEMKV_SCRATCH", "/data/scratch")
 
 # Per-process token appended to static asset URLs so each container start busts
 # any browser cache. New container → new token → forced refetch of JS/CSS.
@@ -59,7 +61,7 @@ async def lifespan(app: FastAPI):
         library.backfill(str(OUTPUT_ROOT))
     except Exception:
         logging.getLogger(__name__).exception("library backfill failed")
-    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT, library=library)
+    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT, library=library, scratch_dir=MAKEMKV_SCRATCH)
     await ripper.start()
     tmdb = TMDBClient()
     app.state.ripper = ripper
@@ -100,6 +102,9 @@ async def library_page(request: Request) -> HTMLResponse:
 
 @app.get("/api/scan", response_model=ScanResult)
 async def api_scan() -> ScanResult:
+    bd = await bluray_detect_and_scan(DVD_DEVICE)
+    if bd is not None:
+        return bd
     return await scan(DVD_DEVICE)
 
 
@@ -150,6 +155,7 @@ async def api_rip(payload: RipRequest, request: Request) -> dict:
             encoder_mode=payload.encoder_mode,
             content_type=payload.content_type,
             burn_forced=payload.burn_forced_subtitles,
+            disc_format=payload.disc_format,
             movie=payload.movie,
             tv=payload.tv,
         )
