@@ -14,7 +14,9 @@ Common settings target Plex playback:
 - AAC stereo + AC3 5.1 passthrough (Plex direct-plays both on virtually every client)
 - Decomb deinterlace (DVD content is frequently interlaced)
 - Auto crop + automatic anamorphic to preserve correct aspect
-- Chapter markers, MP4 with faststart for instant playback
+- Chapter markers; MP4 with faststart for DVD, MKV for Blu-ray (so PGS subtitles
+  can ride along as soft/selectable tracks — MP4 can't carry them). The container
+  is chosen from the output path's extension.
 - Burn-in forced subtitles, soft-include the rest
 """
 
@@ -72,14 +74,20 @@ def build_handbrake_args(
         bitrates += ["160", "160"]   # bitrate is ignored for the copy/passthrough track
         arates += ["auto", "auto"]
 
+    # Container follows the output extension: Blu-ray rips are .mkv so the disc's
+    # PGS (bitmap) subtitles can ride along as soft/selectable tracks — MP4 can't
+    # carry PGS. --optimize (faststart) is MP4-only; MKV needs neither.
+    is_mkv = output_path.lower().endswith(".mkv")
+    container = "av_mkv" if is_mkv else "av_mp4"
+
     args: list[str] = [
         "HandBrakeCLI",
         *( ["--input", input_file, "--title", "1"]
            if input_file is not None
            else ["--input", device, "--title", str(title_index)] ),
         "--output", output_path,
-        "--format", "av_mp4",
-        "--optimize",                 # MP4 faststart
+        "--format", container,
+        *(["--optimize"] if not is_mkv else []),  # MP4 faststart
         "--markers",                  # chapter markers
         "--decomb", "default",        # adaptive deinterlace
         "--crop-mode", "auto",

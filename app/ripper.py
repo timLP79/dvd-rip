@@ -90,6 +90,9 @@ class Ripper:
         movie: Optional[MovieMetadata] = None,
         tv: Optional[TVMetadata] = None,
     ) -> Job:
+        # Blu-ray outputs MKV so the disc's PGS subtitles embed as soft/selectable
+        # tracks (MP4 can't carry PGS); DVD stays MP4.
+        ext = "mkv" if disc_format == "bluray" else "mp4"
         if content_type is ContentType.MOVIE:
             if movie is None:
                 raise ValueError("movie metadata required for content_type=movie")
@@ -98,6 +101,7 @@ class Ripper:
                 title=movie.title,
                 year=movie.year,
                 part_index=selection.part_index,
+                ext=ext,
             )
         else:
             if tv is None:
@@ -109,6 +113,7 @@ class Ripper:
                 show=tv.show,
                 season=tv.season,
                 episode=selection.episode_number,
+                ext=ext,
             )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)

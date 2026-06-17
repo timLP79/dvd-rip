@@ -218,13 +218,16 @@ class Library:
             return 0
         existing = self._existing_paths()
         added = 0
-        for mp4 in sorted(root.rglob("*.mp4")):
+        media = sorted(p for ext in ("*.mp4", "*.mkv") for p in root.rglob(ext))
+        for mp4 in media:
             if str(mp4) in existing:
                 continue
             record = parse_output_path(mp4, root)
             if record is None:
                 log.debug("backfill: could not parse %s", mp4)
                 continue
+            # Infer disc_format from the container (BD rips are .mkv).
+            record.disc_format = "bluray" if mp4.suffix.lower() == ".mkv" else "dvd"
             try:
                 record.file_size_bytes = mp4.stat().st_size
             except OSError:

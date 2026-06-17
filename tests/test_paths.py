@@ -38,6 +38,16 @@ def test_tv_episode_path_zero_pads(tmp_path):
     assert p.parent.name == "Season 05"
 
 
+def test_ext_param_controls_container(tmp_path):
+    # Blu-ray rips pass ext="mkv"; DVD keeps the default mp4.
+    m = movie_path(tmp_path, title="The Martian", year=2015, ext="mkv")
+    assert m.name == "The Martian (2015).mkv"
+    mp = movie_path(tmp_path, title="Dune", year=2021, part_index=2, ext="mkv")
+    assert mp.name == "Dune (2021) - cd2.mkv"
+    tv = tv_episode_path(tmp_path, show="Deadwood", season=1, episode=1, ext="mkv")
+    assert tv.name == "Deadwood S01E01.mkv"
+
+
 def test_tv_episode_path_double_digit_season(tmp_path):
     p = tv_episode_path(tmp_path, show="Doctor Who", season=12, episode=3)
     assert p.parent.name == "Season 12"

@@ -75,7 +75,9 @@ ${OUTPUT_DIR}/
 ```
 
 Plex auto-stacks `- cd2`, `- cd3`, … into a single movie entry. Show folders omit the
-year (Plex pulls year + episode titles from its own metadata sources).
+year (Plex pulls year + episode titles from its own metadata sources). DVD rips are
+`.mp4`; Blu-ray rips are `.mkv` (see [Blu-ray](#blu-ray) for why) — the naming is
+otherwise identical.
 
 ## TMDB metadata lookup
 
@@ -118,21 +120,36 @@ Ripping a Blu-ray requires two extra things:
 
 2. **~40 GB of transient scratch space** under `./data` — the rip runs in two phases:
    MakeMKV first decrypts the selected title to a temporary MKV in `./data/scratch`,
-   then HandBrake encodes that MKV to the final H.264 MP4. The scratch MKV is deleted
+   then HandBrake encodes that MKV to the final H.264 file. The scratch MKV is deleted
    once the encode finishes (or is cancelled). Make sure the `./data` volume has enough
    headroom before starting a Blu-ray rip.
 
 3. **Your drive id in `MAKEMKV_SDF_STOP`** — most non-LibreDrive USB Blu-ray drives on
    Linux otherwise make `makemkvcon` hang at 100% CPU during "SDF" (drive-firmware)
    processing. Setting `MAKEMKV_SDF_STOP` runs the drive in standard AACS mode, which
-   reads 1080p Blu-ray fine (LibreDrive is only needed for UHD/4K). To find your id, run
-   one scan, then look in `./data` … actually in the container at
-   `~/.MakeMKV/MakeMKV_log.txt` for the line `SDF auto vNN: <id>` and copy `<id>` into
-   `.env`, e.g.:
+   reads 1080p Blu-ray fine (LibreDrive is only needed for UHD/4K). To find your id, do
+   one scan attempt, then read the drive id from the log inside the container:
+
+   ```bash
+   docker compose exec dvd-rip grep "SDF auto" /home/app/MakeMKV_log.txt
+   # -> SDF auto v0a5: PIONEER_BD-RW___BDR-XD08_1.00_BHDL000771UC
+   ```
+
+   Copy that id into `.env` and `make restart`:
 
    ```bash
    MAKEMKV_SDF_STOP=PIONEER_BD-RW___BDR-XD08_1.00_BHDL000771UC
    ```
+
+### Blu-ray outputs MKV (not MP4)
+
+Blu-ray rips are written as **`.mkv`**, while DVD rips stay `.mp4`. The reason is
+subtitles: Blu-ray subtitles are **PGS** (bitmap), which an MP4 container can't carry as
+a soft/selectable track — only MKV can. So your disc's English subtitle stays selectable
+(and forced subtitles still burn in), matching the DVD behaviour. Plex Direct Plays MKV
+on the Android app and Direct Streams it to Chromecast (a cheap container rewrap, no video
+re-encode); turning bitmap subtitles **on** triggers a burn-transcode, exactly as it does
+for DVD VOBSUB. Both formats coexist in one Plex library.
 
 > **Note:** Blu-ray scans are slower than DVD — for discs with BD+ copy protection
 > MakeMKV runs a decode pass that "may take up to a few minutes" before titles appear.
