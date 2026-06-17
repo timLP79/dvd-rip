@@ -66,6 +66,21 @@ def parse_makemkv_progress(line: str) -> Optional[float]:
     return round(total / pmax * 100.0, 1)
 
 
+# MakeMKV reports the current operation title on PRGC lines. We surface it as a
+# user-facing stage so the progress bar resetting between operations (disc analysis
+# vs. the long "Saving to MKV" copy) reads as distinct, labelled steps.
+_PRGC_RE = re.compile(r'^PRGC:\d+,\d+,"(.*)"$')
+
+
+def _stage_label(makemkv_operation: str) -> str:
+    """Map a MakeMKV current-operation title to a user-facing decrypt stage.
+
+    "Saving to MKV file" is the long copy of the decrypted title; everything
+    before it (opening, analyzing, BD+ processing) is disc preparation.
+    """
+    return "Extracting title" if "sav" in makemkv_operation.lower() else "Analyzing disc"
+
+
 @dataclass
 class _TitleAcc:
     index: int
@@ -196,11 +211,14 @@ async def decrypt_title(
     scratch_dir: str,
     *,
     on_progress: Optional[Callable[[float], None]] = None,
+    on_stage: Optional[Callable[[str], None]] = None,
     register_proc: Optional[Callable] = None,
 ) -> Path:
     """Decrypt one title to an MKV in scratch_dir. Returns the produced .mkv path.
 
     register_proc(proc) lets the caller (ripper) hold the process for cancellation.
+    on_stage(label) is called when the MakeMKV operation changes ("Analyzing disc"
+    -> "Extracting title"), so the UI can show what's happening.
     Raises RuntimeError on failure (with a tail of makemkvcon output).
     """
     Path(scratch_dir).mkdir(parents=True, exist_ok=True)
@@ -215,6 +233,7 @@ async def decrypt_title(
     if register_proc:
         register_proc(proc)
     tail: list[str] = []
+    last_stage: Optional[str] = None
     try:
         while True:
             raw = await proc.stdout.readline()
@@ -225,7 +244,16 @@ async def decrypt_title(
             if pct is not None:
                 if on_progress:
                     on_progress(pct)
-            elif line:
+                continue
+            sm = _PRGC_RE.match(line)
+            if sm:
+                stage = _stage_label(sm.group(1))
+                if stage != last_stage:
+                    last_stage = stage
+                    if on_stage:
+                        on_stage(stage)
+                continue
+            if line:
                 tail.append(line)
                 if len(tail) > 25:
                     tail.pop(0)

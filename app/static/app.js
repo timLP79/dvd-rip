@@ -562,7 +562,7 @@ function updateJob(li, job) {
   statusEl.textContent = job.status;
   $('.progress-bar', li).style.width = `${Math.max(0, Math.min(100, job.percent || 0))}%`;
   const meta = [];
-  if (job.phase) meta.push(job.phase === 'decrypting' ? 'Decrypting' : 'Encoding');
+  if (job.phase) meta.push(job.phase);  // backend sends a human-readable stage label
   if (job.percent != null) meta.push(`${(job.percent).toFixed(1)}%`);
   if (job.fps != null) meta.push(`${job.fps.toFixed(1)} fps`);
   if (job.eta_seconds != null) meta.push(fmtEta(job.eta_seconds));

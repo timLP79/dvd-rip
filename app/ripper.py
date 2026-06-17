@@ -277,14 +277,18 @@ class Ripper:
         try:
             # Phase 1: decrypt (makemkvcon). A cancel kills the process, which makes
             # decrypt_title raise — classify cancel vs genuine failure explicitly.
-            self._update(job_id, status=JobStatus.RUNNING, phase="decrypting", percent=0.0)
+            self._update(job_id, status=JobStatus.RUNNING, phase="Analyzing disc", percent=0.0)
             def _prog(p: float) -> None:
                 self._update(job_id, percent=p)
+            def _stage(label: str) -> None:
+                # New MakeMKV operation → reset the bar so each stage reads 0→100%.
+                self._update(job_id, phase=label, percent=0.0)
             self._current_job_id = job_id
             try:
                 mkv_path = await bluray.decrypt_title(
                     self.device, selection.index, self.scratch_dir,
                     on_progress=_prog,
+                    on_stage=_stage,
                     register_proc=lambda pr: setattr(self, "_current_process", pr),
                 )
             except Exception as exc:
@@ -300,7 +304,7 @@ class Ripper:
                     self._save_record(job_id, JobStatus.FAILED, error=msg)
                 return
             # Phase 2: encode (HandBrake on the temp MKV)
-            self._update(job_id, phase="encoding", percent=0.0)
+            self._update(job_id, phase="Encoding video", percent=0.0)
             rc = await self._run_handbrake(
                 job_id, input_file=str(mkv_path), output_path=output_path,
                 selection=selection, encoder_mode=encoder_mode, burn_forced=burn_forced,

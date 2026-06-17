@@ -88,6 +88,25 @@ def test_parse_makemkv_info_real_disc_fixture():
     assert sum(1 for t in titles if t.is_main_feature) == 1
 
 
+def test_stage_label_maps_makemkv_operations():
+    from app.bluray import _stage_label
+    # "Saving to MKV file" is the long extraction copy.
+    assert _stage_label("Saving to MKV file") == "Extracting title"
+    assert _stage_label("Saving all titles to MKV files") == "Extracting title"
+    # Everything before the save is preparation/analysis.
+    assert _stage_label("Analyzing seamless segments") == "Analyzing disc"
+    assert _stage_label("Opening Blu-ray disc") == "Analyzing disc"
+    assert _stage_label("Processing BD+ code") == "Analyzing disc"
+
+
+def test_prgc_line_matches_stage_regex():
+    from app.bluray import _PRGC_RE, _stage_label
+    m = _PRGC_RE.match('PRGC:5017,0,"Saving to MKV file"')
+    assert m and _stage_label(m.group(1)) == "Extracting title"
+    # A progress-value line must NOT match the operation-title regex.
+    assert _PRGC_RE.match("PRGV:16384,32768,65536") is None
+
+
 def test_parse_makemkv_progress():
     assert parse_makemkv_progress("PRGV:16384,32768,65536") == 50.0
     assert parse_makemkv_progress("PRGV:0,0,65536") == 0.0

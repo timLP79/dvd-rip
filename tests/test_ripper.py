@@ -97,7 +97,7 @@ def test_bluray_job_runs_two_phases(tmp_path, monkeypatch):
 
     calls = []
 
-    async def fake_decrypt(device, title_id, scratch_dir, *, on_progress=None, register_proc=None):
+    async def fake_decrypt(device, title_id, scratch_dir, *, on_progress=None, on_stage=None, register_proc=None):
         calls.append(("decrypt", title_id))
         if on_progress:
             on_progress(100.0)
@@ -142,7 +142,7 @@ def test_bluray_cancel_during_decrypt_marks_cancelled(tmp_path, monkeypatch):
     r = Ripper(device="/dev/sr0", output_root=tmp_path, library=lib,
                scratch_dir=str(tmp_path / "scratch"))
 
-    async def fake_decrypt(device, title_id, scratch_dir, *, on_progress=None, register_proc=None):
+    async def fake_decrypt(device, title_id, scratch_dir, *, on_progress=None, on_stage=None, register_proc=None):
         # simulate cancel(): mark intent + raise as a killed process would
         r._cancelling.add(job_id_holder["id"])
         raise RuntimeError("makemkvcon exited with code -15")
