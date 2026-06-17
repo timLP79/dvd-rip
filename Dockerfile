@@ -63,7 +63,8 @@ ENV DVD_DEVICE=/dev/sr0 \
     TMDB_API_KEY="" \
     LIBRARY_DB=/data/library.db \
     MAKEMKV_APP_KEY="" \
-    MAKEMKV_SCRATCH=/data/scratch
+    MAKEMKV_SCRATCH=/data/scratch \
+    MAKEMKV_SDF_STOP=""
 
 EXPOSE 8000
 

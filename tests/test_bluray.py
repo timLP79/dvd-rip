@@ -60,6 +60,34 @@ def test_parse_makemkv_info_titles():
     assert titles[1].is_main_feature is False
 
 
+def test_parse_makemkv_info_real_disc_fixture():
+    """Validated against real `makemkvcon -r info` output captured from a Blu-ray
+    (The Martian, BD+; Pioneer BDR-XD08). Guards the parser against drift from the
+    actual robot format — the synthetic SAMPLE_INFO above can't catch that."""
+    from pathlib import Path
+
+    fixture = Path(__file__).parent / "fixtures" / "makemkv_info_the_martian.txt"
+    raw = fixture.read_text(encoding="utf-8", errors="replace")
+
+    assert is_bluray_output(raw) is True
+    titles = parse_makemkv_info(raw)
+    assert len(titles) == 11  # TCOUNT:11
+
+    # Title 2 (00800.mpls) is the real feature; titles 0/1 are anti-rip decoy playlists.
+    main = next(t for t in titles if t.is_main_feature)
+    assert main.index == 2
+    assert main.duration_seconds == 2 * 3600 + 21 * 60 + 37  # 2:21:37
+    assert main.frame_width == 1920 and main.frame_height == 1080
+    assert main.chapter_count == 32
+    # 6 audio tracks, English DTS-HD MA first; 12 subtitle tracks.
+    assert len(main.audio_tracks) == 6
+    assert main.audio_tracks[0].language == "English"
+    assert main.audio_tracks[0].codec == "DTS-HD Master Audio"
+    assert len(main.subtitle_tracks) == 12
+    # exactly one main feature flagged
+    assert sum(1 for t in titles if t.is_main_feature) == 1
+
+
 def test_parse_makemkv_progress():
     assert parse_makemkv_progress("PRGV:16384,32768,65536") == 50.0
     assert parse_makemkv_progress("PRGV:0,0,65536") == 0.0

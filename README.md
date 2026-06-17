@@ -122,6 +122,27 @@ Ripping a Blu-ray requires two extra things:
    once the encode finishes (or is cancelled). Make sure the `./data` volume has enough
    headroom before starting a Blu-ray rip.
 
+3. **Your drive id in `MAKEMKV_SDF_STOP`** — most non-LibreDrive USB Blu-ray drives on
+   Linux otherwise make `makemkvcon` hang at 100% CPU during "SDF" (drive-firmware)
+   processing. Setting `MAKEMKV_SDF_STOP` runs the drive in standard AACS mode, which
+   reads 1080p Blu-ray fine (LibreDrive is only needed for UHD/4K). To find your id, run
+   one scan, then look in `./data` … actually in the container at
+   `~/.MakeMKV/MakeMKV_log.txt` for the line `SDF auto vNN: <id>` and copy `<id>` into
+   `.env`, e.g.:
+
+   ```bash
+   MAKEMKV_SDF_STOP=PIONEER_BD-RW___BDR-XD08_1.00_BHDL000771UC
+   ```
+
+> **Note:** Blu-ray scans are slower than DVD — for discs with BD+ copy protection
+> MakeMKV runs a decode pass that "may take up to a few minutes" before titles appear.
+>
+> **MakeMKV servers:** `makemkvcon` is configured to never phone home
+> (`app_UpdateEnable=0` + `MAKEMKV_SDF_STOP`), so rips keep working even while
+> makemkv.com is unreachable. The only effect is that disc-specific BD+ data can't be
+> downloaded; MakeMKV falls back to a built-in generic table, which handles typical
+> 1080p discs.
+
 The DVD path is unchanged — no extra config needed for DVD-only use.
 
 ## Configuration
@@ -137,6 +158,7 @@ The DVD path is unchanged — no extra config needed for DVD-only use.
 | `LIBRARY_DB`  | `/data/library.db` | SQLite rip ledger; persisted via the `./data:/data` mount |
 | `MAKEMKV_APP_KEY` | _(unset)_ | MakeMKV beta key — required for Blu-ray; rotates ~monthly |
 | `MAKEMKV_SCRATCH` | `/data/scratch` | Scratch dir for transient decrypt MKVs (~40 GB needed) |
+| `MAKEMKV_SDF_STOP` | _(unset)_ | Drive id to run in standard (non-LibreDrive) mode — avoids the 100%-CPU SDF hang on most USB BD drives |
 | `LOG_LEVEL`   | `INFO`        | `DEBUG` for verbose HandBrake stdout        |
 
 The compose file maps `${DVD_DEVICE:-/dev/sr0}` from host to `/dev/sr0` inside the container,

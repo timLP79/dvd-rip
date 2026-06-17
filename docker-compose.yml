@@ -23,6 +23,18 @@ services:
       TMDB_API_KEY: "${TMDB_API_KEY:-}"
       MAKEMKV_APP_KEY: "${MAKEMKV_APP_KEY:-}"
       MAKEMKV_SCRATCH: /data/scratch
+      # Drive id to run in standard (non-LibreDrive) mode — avoids the SDF 100%-CPU
+      # hang on non-LibreDrive drives. Set in .env to your drive id. See entrypoint.sh.
+      MAKEMKV_SDF_STOP: "${MAKEMKV_SDF_STOP:-}"
+    extra_hosts:
+      # WORKAROUND (dvd-rip-br7): makemkv.com's domain registration lapsed, so its DNS
+      # returns SERVFAIL under DNSSEC validation. Pinning any reachable IP keeps a stray
+      # makemkv.com lookup from hanging makemkvcon on a slow DNS failure (the real fix
+      # is app_UpdateEnable=0 + sdf_Stop, which stop it contacting the server at all).
+      # 88.212.208.67 is the current registrar parking IP; override via MAKEMKV_HOST_IP.
+      # Remove this block once MakeMKV restores their domain/DNS.
+      - "makemkv.com:${MAKEMKV_HOST_IP:-88.212.208.67}"
+      - "www.makemkv.com:${MAKEMKV_HOST_IP:-88.212.208.67}"
     group_add:
       - "${CDROM_GID:-24}"
     deploy:

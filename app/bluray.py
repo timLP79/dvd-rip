@@ -13,6 +13,7 @@ import asyncio
 import logging
 import re
 import shlex
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -148,7 +149,12 @@ def parse_makemkv_info(robot_output: str) -> list[Title]:
     return out
 
 
-async def _spawn(cmd: list[str], timeout: float = 180.0) -> tuple[int, str, str]:
+# BD+ discs make `info` slow: MakeMKV warns the BD+ pass "may take up to few minutes".
+# Real measurement on a BD+ disc (The Martian) was ~3-4 min, so a 180s cap aborted it.
+_INFO_TIMEOUT = 600.0
+
+
+async def _spawn(cmd: list[str], timeout: float = _INFO_TIMEOUT) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
@@ -165,7 +171,7 @@ async def detect_and_scan(device: str, *, _run: Callable = _spawn) -> Optional[S
     """Run `makemkvcon info`; return a Blu-ray ScanResult, or None to fall back to DVD."""
     cmd = ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"]
     try:
-        rc, out, err = await _run(cmd, timeout=180.0)
+        rc, out, err = await _run(cmd, timeout=_INFO_TIMEOUT)
     except FileNotFoundError:
         log.error("makemkvcon not found on PATH")
         return None
@@ -201,6 +207,7 @@ async def decrypt_title(
     cmd = ["makemkvcon", "-r", "--cache=1", "--progress=-same",
            "mkv", f"dev:{device}", str(title_id), scratch_dir]
     log.info("decrypt_title: %s", shlex.join(cmd))
+    started = time.time()
     before = set(Path(scratch_dir).glob("*.mkv"))
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -230,7 +237,11 @@ async def decrypt_title(
     if rc != 0:
         detail = "\n".join(tail).strip()
         raise RuntimeError(f"makemkvcon exited with code {rc}\n{detail}")
-    new_files = set(Path(scratch_dir).glob("*.mkv")) - before
-    if not new_files:
+    # Prefer genuinely new files; but makemkvcon names output deterministically and
+    # overwrites a same-named leftover in place (set-diff would then be empty even
+    # though the decrypt succeeded), so fall back to any .mkv written during this run.
+    after = set(Path(scratch_dir).glob("*.mkv"))
+    produced = (after - before) or {p for p in after if p.stat().st_mtime >= started - 1}
+    if not produced:
         raise RuntimeError("makemkvcon produced no .mkv file")
-    return max(new_files, key=lambda p: p.stat().st_mtime)
+    return max(produced, key=lambda p: p.stat().st_mtime)
