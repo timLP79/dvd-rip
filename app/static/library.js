@@ -13,6 +13,15 @@ function fmtDate(iso) {
   return iso.slice(0, 10);
 }
 
+function fmtDuration(seconds) {
+  // Rip wall-clock as H:mm:ss. Null for backfilled/failed rows (duration unknown).
+  if (seconds == null) return '—';
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function label(r) {
   if (r.content_type === 'tv') {
     const s = String(r.season ?? 0).padStart(2, '0');
@@ -31,7 +40,7 @@ async function load() {
   for (const r of rows) {
     const tr = document.createElement('tr');
     const cells = [label(r), fmtDate(r.created_at), fmtSize(r.file_size_bytes),
-                   r.encoder_mode || '—', r.status];
+                   fmtDuration(r.rip_seconds), r.encoder_mode || '—', r.status];
     for (const c of cells) {
       const td = document.createElement('td');
       td.textContent = c;
