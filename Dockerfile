@@ -41,7 +41,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p tmp && echo accepted > tmp/eula_accepted \
     && make -j"$(nproc)" >/dev/null && make install \
     && cd / && rm -rf /tmp/makemkv-* \
+    # Keep libdvdcss2/libdvd-pkg: HandBrake dlopens libdvdcss at runtime (no hard
+    # dpkg dependency), so the autoremove below would otherwise sweep it as an
+    # orphan and silently break CSS-DVD decryption. See dvd-rip-96z.
     && apt-get purge -y build-essential pkg-config wget && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# CSS-DVD decryption. Built in its OWN layer AFTER the MakeMKV layer's autoremove
+# so it can't be swept as an orphan — HandBrake dlopens libdvdcss at runtime, so
+# nothing declares a hard dpkg dependency on it and autoremove considered it unused,
+# silently breaking DVD decryption. See dvd-rip-96z.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libdvd-pkg \
+    && echo 'libdvd-pkg libdvd-pkg/post-invoke_hook-install boolean true' | debconf-set-selections \
+    && echo 'libdvd-pkg libdvd-pkg/build boolean true' | debconf-set-selections \
+    && echo 'libdvd-pkg libdvd-pkg/first-install note' | debconf-set-selections \
+    && dpkg-reconfigure -f noninteractive libdvd-pkg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
