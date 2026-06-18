@@ -46,13 +46,58 @@ def test_scan_endpoint_returns_titles(client):
     async def fake_scan(device):
         return fake
 
-    with patch("app.main.scan", side_effect=fake_scan):
+    async def fake_is_dvd(device):
+        return True  # deterministic: take the DVD path without spawning lsdvd
+
+    with patch("app.main.is_dvd_video", side_effect=fake_is_dvd), \
+         patch("app.main.scan", side_effect=fake_scan):
         res = client.get("/api/scan")
     assert res.status_code == 200
     body = res.json()
     assert body["dvd_label"] == "TEST_DISC"
     assert body["titles"][0]["index"] == 1
     assert body["titles"][0]["is_main_feature"] is True
+
+
+def test_scan_dvd_skips_makemkv(client):
+    """A DVD-Video disc routes to the DVD scanner and never invokes makemkvcon."""
+    fake = ScanResult(dvd_label="DVD_DISC", titles=[])
+    bluray_called = {"hit": False}
+
+    async def fake_is_dvd(device):
+        return True
+
+    async def fake_scan(device):
+        return fake
+
+    async def fake_bluray(device):
+        bluray_called["hit"] = True
+        return None
+
+    with patch("app.main.is_dvd_video", side_effect=fake_is_dvd), \
+         patch("app.main.scan", side_effect=fake_scan), \
+         patch("app.main.bluray_detect_and_scan", side_effect=fake_bluray):
+        res = client.get("/api/scan")
+    assert res.status_code == 200
+    assert res.json()["dvd_label"] == "DVD_DISC"
+    assert bluray_called["hit"] is False  # makemkvcon must NOT run for a DVD
+
+
+def test_scan_uses_bluray_when_not_dvd(client):
+    """A non-DVD disc falls through to makemkvcon-based Blu-ray detection."""
+    bd = ScanResult(dvd_label="BLURAY", titles=[], disc_format="bluray")
+
+    async def fake_is_dvd(device):
+        return False
+
+    async def fake_bluray(device):
+        return bd
+
+    with patch("app.main.is_dvd_video", side_effect=fake_is_dvd), \
+         patch("app.main.bluray_detect_and_scan", side_effect=fake_bluray):
+        res = client.get("/api/scan")
+    assert res.status_code == 200
+    assert res.json()["disc_format"] == "bluray"
 
 
 def test_rip_rejects_empty_titles(client):

@@ -1,8 +1,9 @@
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from app.dvd import parse_handbrake_scan, parse_lsdvd_label, _safe_label
+from app.dvd import is_dvd_video, parse_handbrake_scan, parse_lsdvd_label, _safe_label
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -44,6 +45,31 @@ def test_main_feature_fallback_picks_longest_over_threshold():
 def test_empty_scan_returns_no_titles():
     titles = parse_handbrake_scan(_read("scan_empty.txt"))
     assert titles == []
+
+
+def test_is_dvd_video_true_for_dvd():
+    async def fake(cmd, timeout=15.0):
+        return 0, "Disc Title: DVD_VIDEO\nTitle: 01, Length: 01:30:00.000\n", ""
+    assert asyncio.run(is_dvd_video("/dev/sr0", _run=fake)) is True
+
+
+def test_is_dvd_video_false_for_non_dvd():
+    # lsdvd exits non-zero (and prints no DVD structure) on a Blu-ray / data disc.
+    async def fake(cmd, timeout=15.0):
+        return 1, "", "libdvdread: Can't open /dev/sr0 for reading\n"
+    assert asyncio.run(is_dvd_video("/dev/sr0", _run=fake)) is False
+
+
+def test_is_dvd_video_false_when_lsdvd_missing():
+    async def fake(cmd, timeout=15.0):
+        raise FileNotFoundError("lsdvd")
+    assert asyncio.run(is_dvd_video("/dev/sr0", _run=fake)) is False
+
+
+def test_is_dvd_video_false_on_timeout():
+    async def fake(cmd, timeout=15.0):
+        raise asyncio.TimeoutError()
+    assert asyncio.run(is_dvd_video("/dev/sr0", _run=fake)) is False
 
 
 def test_parse_lsdvd_label():

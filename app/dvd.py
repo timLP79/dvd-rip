@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from .models import AudioTrack, ScanResult, SubtitleTrack, Title
 
@@ -143,6 +143,21 @@ def parse_lsdvd_label(stdout: str) -> str:
 def _safe_label(raw: str) -> str:
     cleaned = re.sub(r"[^\w.-]+", "_", raw.strip())
     return cleaned.strip("._-") or "UNKNOWN_DVD"
+
+
+async def is_dvd_video(device: str, *, _run: Callable = _spawn) -> bool:
+    """Fast probe: is the inserted disc a DVD-Video?
+
+    Lets the scan endpoint route DVDs straight to the DVD scanner instead of first
+    running `makemkvcon` (the Blu-ray detector), which is slow and pointless for a
+    DVD it will never rip. `lsdvd` reads only the DVD's VIDEO_TS structure — a
+    second or two — and exits non-zero on a Blu-ray or data disc.
+    """
+    try:
+        rc, stdout, _ = await _run(["lsdvd", device], timeout=15.0)
+    except (FileNotFoundError, asyncio.TimeoutError):
+        return False
+    return rc == 0 and "Disc Title:" in stdout
 
 
 async def scan(

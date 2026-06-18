@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
 from .bluray import detect_and_scan as bluray_detect_and_scan
-from .dvd import scan
+from .dvd import is_dvd_video, scan
 from .library import Library
 from .models import (
     ContentType,
@@ -102,6 +102,11 @@ async def library_page(request: Request) -> HTMLResponse:
 
 @app.get("/api/scan", response_model=ScanResult)
 async def api_scan() -> ScanResult:
+    # Route DVDs straight to the DVD scanner: a quick lsdvd probe avoids running
+    # makemkvcon (the Blu-ray detector) on a disc it would never rip. Only non-DVD
+    # discs go to makemkvcon-based Blu-ray detection.
+    if await is_dvd_video(DVD_DEVICE):
+        return await scan(DVD_DEVICE)
     bd = await bluray_detect_and_scan(DVD_DEVICE)
     if bd is not None:
         return bd
