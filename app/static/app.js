@@ -705,10 +705,13 @@ async function initPushUI() {
       const existing = await reg.pushManager.getSubscription();
       if (existing) {
         await existing.unsubscribe();
-        await fetch('/api/push/unsubscribe', {
+        const res = await fetch('/api/push/unsubscribe', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ endpoint: existing.endpoint }),
         });
+        if (!res.ok) {
+          console.error('unsubscribe rejected by server', res.status);
+        }
         render(null);
         return;
       }
@@ -718,10 +721,17 @@ async function initPushUI() {
         userVisibleOnly: true,
         applicationServerKey: urlB64ToUint8Array(key),
       });
-      await fetch('/api/push/subscribe', {
+      const res = await fetch('/api/push/subscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub),
       });
+      if (!res.ok) {
+        await sub.unsubscribe();
+        render(null);
+        btn.textContent = 'Subscribe failed';
+        console.error('subscribe rejected by server', res.status);
+        return;
+      }
       render(sub);
     } catch (e) {
       console.error('Notification toggle failed:', e);

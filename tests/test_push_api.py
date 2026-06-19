@@ -46,6 +46,7 @@ def test_test_endpoint_counts_sends(client, monkeypatch):
 
 
 def test_subscribe_rejects_unknown_endpoint(client):
+    from app import main as main_module
     bad = {"endpoint": "https://evil.example/inject",
            "keys": {"p256dh": "p", "auth": "a"}}
     assert client.post("/api/push/subscribe", json=bad).status_code == 400
@@ -53,6 +54,7 @@ def test_subscribe_rejects_unknown_endpoint(client):
     insecure = {"endpoint": "http://fcm.googleapis.com/fcm/send/x",
                 "keys": {"p256dh": "p", "auth": "a"}}
     assert client.post("/api/push/subscribe", json=insecure).status_code == 400
+    assert main_module.app.state.library.list_subscriptions() == []
 
 
 def test_subscribe_caps_count(client, monkeypatch):
@@ -78,3 +80,4 @@ def test_push_key_disabled_without_vapid(tmp_path, monkeypatch):
     reload(main_module)
     with TestClient(main_module.app) as c:
         assert c.get("/api/push/key").json()["enabled"] is False
+        assert c.get("/api/push/key").json()["key"] == ""

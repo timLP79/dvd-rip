@@ -176,7 +176,8 @@ async def index(request: Request) -> HTMLResponse:
 @app.get("/sw.js")
 async def service_worker() -> FileResponse:
     # Served from the root so its scope is "/" (covers the whole app), not "/static/".
-    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/library", response_class=HTMLResponse)

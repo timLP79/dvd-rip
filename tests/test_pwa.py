@@ -20,6 +20,7 @@ def test_service_worker_served_at_root_scope(client):
     assert res.status_code == 200
     assert "javascript" in res.headers["content-type"]
     assert "addEventListener('push'" in res.text
+    assert "no-cache" in res.headers.get("cache-control", "")
 
 
 def test_manifest_served(client):
