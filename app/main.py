@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
@@ -97,6 +97,12 @@ async def index(request: Request) -> HTMLResponse:
             "asset_version": ASSET_VERSION,
         },
     )
+
+
+@app.get("/sw.js")
+async def service_worker() -> FileResponse:
+    # Served from the root so its scope is "/" (covers the whole app), not "/static/".
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
 
 
 @app.get("/library", response_class=HTMLResponse)
