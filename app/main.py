@@ -21,6 +21,8 @@ from .library import Library
 from .models import (
     ContentType,
     Job,
+    PushSubscription,
+    PushUnsubscribe,
     RipRecord,
     RipRequest,
     ScanResult,
@@ -233,5 +235,32 @@ async def api_cancel(job_id: str, request: Request) -> dict:
     if not ok:
         raise HTTPException(status_code=409, detail="Job not cancellable")
     return {"cancelled": True}
+
+
+@app.get("/api/push/key")
+async def api_push_key(request: Request) -> dict:
+    push: PushSender = request.app.state.push
+    return {"enabled": push.enabled, "key": push.public_key}
+
+
+@app.post("/api/push/subscribe")
+async def api_push_subscribe(sub: PushSubscription, request: Request) -> dict:
+    library: Library = request.app.state.library
+    library.add_subscription(sub.endpoint, sub.keys.p256dh, sub.keys.auth)
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+async def api_push_unsubscribe(body: PushUnsubscribe, request: Request) -> dict:
+    library: Library = request.app.state.library
+    library.remove_subscription(body.endpoint)
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+async def api_push_test(request: Request) -> dict:
+    push: PushSender = request.app.state.push
+    sent = await push.notify_test()
+    return {"sent": sent}
 
 
