@@ -92,6 +92,13 @@ async function scan() {
   titlesSec.hidden = true;
   try {
     const res = await fetch('/api/scan');
+    if (res.status === 409) {
+      // A rip is using the drive — don't rescan it. Progress shows in the Jobs section.
+      status.textContent = 'Rip in progress — disc scan paused. Watch progress in Jobs below.';
+      status.classList.remove('error');
+      status.hidden = false;
+      return;
+    }
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     state.scan = data;

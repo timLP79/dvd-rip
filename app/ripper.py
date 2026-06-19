@@ -152,6 +152,10 @@ class Ripper:
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
+    def is_busy(self) -> bool:
+        """True while a rip is actively running (the optical drive is in use)."""
+        return self._current_job_id is not None
+
     def list_jobs(self) -> list[Job]:
         return [self._jobs[jid] for jid in self._job_order if jid in self._jobs]
 

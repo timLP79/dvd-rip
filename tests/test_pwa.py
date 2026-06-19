@@ -89,3 +89,11 @@ def test_library_js_filter_paginate_logic(client):
     assert "include_unsuccessful=true" in js
     assert "function matches" in js
     assert "No rips match your filters" in js
+
+
+def test_app_js_handles_scan_409(client):
+    # Opening the page during a rip: /api/scan returns 409 and the UI must show a
+    # "rip in progress" message instead of an error, not retrigger a disc scan.
+    js = client.get("/static/app.js").text
+    assert "res.status === 409" in js
+    assert "Rip in progress" in js

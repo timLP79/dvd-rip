@@ -268,3 +268,16 @@ def test_scan_falls_back_to_dvd(client):
     assert res.status_code == 200
     assert res.json()["disc_format"] == "dvd"
     assert res.json()["dvd_label"] == "A_DVD"
+
+
+def test_scan_blocked_while_rip_running(client):
+    """Opening the page (auto-scan) or hitting Rescan during an active rip must NOT
+    touch the drive — /api/scan returns 409 before any scan subprocess runs."""
+    from app import main as main_module
+    ripper = main_module.app.state.ripper
+    ripper._current_job_id = "job-x"
+    try:
+        res = client.get("/api/scan")
+        assert res.status_code == 409
+    finally:
+        ripper._current_job_id = None

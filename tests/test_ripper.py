@@ -193,3 +193,12 @@ def test_save_record_fires_push(tmp_path):
     assert len(records) == 1
     assert records[0].title == "Inception"
     assert records[0].status == JobStatus.DONE
+
+
+def test_is_busy_reflects_current_job():
+    r = Ripper(device="/dev/null", output_root=Path("/tmp"), library=None)
+    assert r.is_busy() is False
+    r._current_job_id = "job-1"          # a rip is actively running -> drive in use
+    assert r.is_busy() is True
+    r._current_job_id = None
+    assert r.is_busy() is False

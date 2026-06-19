@@ -188,7 +188,14 @@ async def library_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/api/scan", response_model=ScanResult)
-async def api_scan() -> ScanResult:
+async def api_scan(request: Request) -> ScanResult:
+    # A running rip is using the optical drive; scanning it concurrently spins the
+    # disc and can disrupt the rip (especially Blu-ray/makemkvcon). Refuse to touch
+    # the drive while a rip is active — any client (incl. an auto-scan on page load)
+    # gets 409 instead. Progress is still visible via /api/jobs.
+    ripper: Ripper = request.app.state.ripper
+    if ripper.is_busy():
+        raise HTTPException(status_code=409, detail="Rip in progress; disc scan unavailable")
     # Route DVDs straight to the DVD scanner: a quick lsdvd probe avoids running
     # makemkvcon (the Blu-ray detector) on a disc it would never rip. Only non-DVD
     # discs go to makemkvcon-based Blu-ray detection.
