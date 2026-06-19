@@ -685,36 +685,50 @@ async function initPushUI() {
     return;
   }
 
-  const reg = await navigator.serviceWorker.register('/sw.js');
+  let reg;
   const render = (sub) => {
     btn.classList.toggle('active', !!sub);
     btn.textContent = sub ? 'Notifications on' : 'Enable notifications';
   };
-  render(await reg.pushManager.getSubscription());
+  try {
+    reg = await navigator.serviceWorker.register('/sw.js');
+    render(await reg.pushManager.getSubscription());
+  } catch (e) {
+    console.error('Push UI init failed:', e);
+    btn.textContent = 'Notifications unavailable';
+    btn.disabled = true;
+    return;
+  }
 
   btn.addEventListener('click', async () => {
-    const existing = await reg.pushManager.getSubscription();
-    if (existing) {
-      await existing.unsubscribe();
-      await fetch('/api/push/unsubscribe', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: existing.endpoint }),
+    try {
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        await existing.unsubscribe();
+        await fetch('/api/push/unsubscribe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: existing.endpoint }),
+        });
+        render(null);
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { btn.textContent = 'Notifications blocked'; return; }
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(key),
       });
-      render(null);
-      return;
+      await fetch('/api/push/subscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub),
+      });
+      render(sub);
+    } catch (e) {
+      console.error('Notification toggle failed:', e);
+      btn.textContent = 'Try again';
+      render(await reg.pushManager.getSubscription());
     }
-    const perm = await Notification.requestPermission();
-    if (perm !== 'granted') { btn.textContent = 'Notifications blocked'; return; }
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlB64ToUint8Array(key),
-    });
-    await fetch('/api/push/subscribe', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sub),
-    });
-    render(sub);
   });
 }
 
-initPushUI();
+initPushUI().catch(console.error);
