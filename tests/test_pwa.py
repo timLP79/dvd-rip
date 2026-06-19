@@ -97,3 +97,16 @@ def test_app_js_handles_scan_409(client):
     js = client.get("/static/app.js").text
     assert "res.status === 409" in js
     assert "Rip in progress" in js
+
+
+def test_rip_page_has_aspect_column(client):
+    html = client.get("/").text
+    assert "<th>Aspect</th>" in html
+    assert "<th>Frame</th>" not in html
+
+
+def test_app_js_renders_and_sends_aspect(client):
+    js = client.get("/static/app.js").text
+    assert "function aspectLabel" in js
+    assert "dataset.aspect" in js
+    assert "aspect: row.dataset.aspect" in js

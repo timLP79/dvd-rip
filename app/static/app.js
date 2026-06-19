@@ -28,6 +28,12 @@ function fmtEta(seconds) {
   return `ETA ${fmtDuration(seconds)}`;
 }
 
+function aspectLabel(a) {
+  if (a === 'widescreen') return 'Widescreen';
+  if (a === 'fullscreen') return 'Full screen';
+  return '—';
+}
+
 // Parse a DVD disc label into a clean search term + parsed disc/season metadata.
 // Example: "PTELLER_S4_D1"      → { search: "Pteller",       season: 4, disc: 1, isLikelyTV: true }
 //          "DEADWOOD_SEASON_1_DISC_2" → { search: "Deadwood", season: 1, disc: 2, isLikelyTV: true }
@@ -344,7 +350,10 @@ function renderTitles(scan) {
     }
     $('.col-duration', row).textContent = fmtDuration(title.duration_seconds);
     $('.col-chapters', row).textContent = title.chapter_count;
-    $('.col-frame', row).textContent = `${title.frame_width}×${title.frame_height}`;
+    const frameCell = $('.col-frame', row);
+    frameCell.textContent = aspectLabel(title.aspect);
+    frameCell.title = `${title.frame_width}×${title.frame_height}`;
+    row.dataset.aspect = title.aspect || '';
 
     const epInput = $('.ep-num', row);
     epInput.addEventListener('change', () => {
@@ -478,6 +487,7 @@ function collectSelections() {
         subtitle_tracks,
         episode_number: epNum,
         episode_title: state.tvEpisodeTitles.get(epNum) || null,
+        aspect: row.dataset.aspect || null,
       });
     } else {
       movieCounter += 1;
@@ -486,6 +496,7 @@ function collectSelections() {
         audio_tracks,
         subtitle_tracks,
         part_index: movieCounter,
+        aspect: row.dataset.aspect || null,
       });
     }
   }
