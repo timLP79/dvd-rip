@@ -26,6 +26,13 @@ services:
       # Drive id to run in standard (non-LibreDrive) mode — avoids the SDF 100%-CPU
       # hang on non-LibreDrive drives. Set in .env to your drive id. See entrypoint.sh.
       MAKEMKV_SDF_STOP: "${MAKEMKV_SDF_STOP:-}"
+      # Phone access (see README "Phone access"). Unset APP_PASSWORD = no login;
+      # unset VAPID_* = Web Push disabled. Generate with `make secrets`.
+      APP_PASSWORD: "${APP_PASSWORD:-}"
+      SESSION_SECRET: "${SESSION_SECRET:-}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
     extra_hosts:
       # WORKAROUND (dvd-rip-br7): makemkv.com's domain registration lapsed, so its DNS
       # returns SERVFAIL under DNSSEC validation. Pinning any reachable IP keeps a stray
