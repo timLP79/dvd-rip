@@ -51,3 +51,15 @@ def test_mobile_titles_reflow_present(client):
     assert "max-width: 480px" in css   # phone breakpoint added
     assert "#titles thead" in css      # table-to-cards reflow
     assert "col-duration::before" in css  # CSS-supplied row labels
+
+
+def test_mobile_library_reflow_present(client):
+    # The library table needs the same stacked-card reflow as the rip page,
+    # driven by data-label attributes set in library.js.
+    assert 'id="library"' in client.get("/library").text
+    css = client.get("/static/style.css").text
+    assert "#library thead" in css
+    assert "content: attr(data-label)" in css
+    js = client.get("/static/library.js").text
+    assert "dataset.label" in js
+    assert "lib-title" in js

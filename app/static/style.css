@@ -751,6 +751,34 @@ button.secondary:hover:not(:disabled) {
   #titles td.col-chapters::before { content: "Chapters"; color: var(--text-muted); }
   #titles td.col-frame::before    { content: "Frame";    color: var(--text-muted); }
 
+  /* Library table: same stacked-card reflow, labels from each cell's data-label. */
+  #library thead { display: none; }
+  #library, #library tbody, #library tr, #library td { display: block; width: 100%; }
+  #library tbody tr {
+    border: 1px solid var(--border, #232733);
+    border-radius: var(--radius, 8px);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  #library tbody td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border: none;
+  }
+  #library tbody td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+  }
+  /* Title cell is the card heading: full width, emphasized, no label. */
+  #library tbody td.lib-title {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  #library tbody td.lib-title::before { content: none; }
+
   /* Comfortable tap targets. */
   input[type="checkbox"] { width: 22px; height: 22px; }
   button, .ghost { min-height: 40px; }

@@ -39,11 +39,21 @@ async function load() {
   body.replaceChildren();
   for (const r of rows) {
     const tr = document.createElement('tr');
-    const cells = [label(r), fmtDate(r.created_at), fmtSize(r.file_size_bytes),
-                   fmtDuration(r.rip_seconds), r.encoder_mode || '—', r.status];
+    // `label` doubles as the per-row card heading on mobile (see #library reflow in
+    // style.css); the rest carry data-label so each cell reads "Label  value" stacked.
+    const cells = [
+      { v: label(r), cls: 'lib-title' },
+      { v: fmtDate(r.created_at), label: 'Ripped' },
+      { v: fmtSize(r.file_size_bytes), label: 'Size' },
+      { v: fmtDuration(r.rip_seconds), label: 'Duration' },
+      { v: r.encoder_mode || '—', label: 'Encoder' },
+      { v: r.status, label: 'Status' },
+    ];
     for (const c of cells) {
       const td = document.createElement('td');
-      td.textContent = c;
+      td.textContent = c.v;
+      if (c.cls) td.className = c.cls;
+      if (c.label) td.dataset.label = c.label;
       tr.appendChild(td);
     }
     if (r.status !== 'done') tr.classList.add('row-muted');
