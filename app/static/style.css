@@ -177,6 +177,11 @@ button.secondary:hover:not(:disabled) {
   color: var(--text-strong);
 }
 
+#btn-notify.active {
+  color: var(--accent-bright, #6f97d8);
+  border-color: var(--accent, #4b73b8);
+}
+
 /* ============================================================
    Status banner
    ============================================================ */

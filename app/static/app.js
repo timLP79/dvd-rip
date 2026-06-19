@@ -657,3 +657,64 @@ document.addEventListener('DOMContentLoaded', () => {
   scan();
   refreshJobs();
 });
+
+// ---- Web Push notify toggle ------------------------------------------------
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const base = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function initPushUI() {
+  const btn = document.getElementById('btn-notify');
+  if (!btn) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return; // unsupported: stay hidden
+
+  let key = '';
+  try {
+    const info = await (await fetch('/api/push/key')).json();
+    if (!info.enabled) return; // push disabled server-side: stay hidden
+    key = info.key;
+  } catch (e) { return; }
+
+  btn.hidden = false;
+  if (!window.isSecureContext) {
+    btn.textContent = 'Open via HTTPS to enable';
+    btn.disabled = true;
+    return;
+  }
+
+  const reg = await navigator.serviceWorker.register('/sw.js');
+  const render = (sub) => {
+    btn.classList.toggle('active', !!sub);
+    btn.textContent = sub ? 'Notifications on' : 'Enable notifications';
+  };
+  render(await reg.pushManager.getSubscription());
+
+  btn.addEventListener('click', async () => {
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      await existing.unsubscribe();
+      await fetch('/api/push/unsubscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: existing.endpoint }),
+      });
+      render(null);
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { btn.textContent = 'Notifications blocked'; return; }
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToUint8Array(key),
+    });
+    await fetch('/api/push/subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+    render(sub);
+  });
+}
+
+initPushUI();

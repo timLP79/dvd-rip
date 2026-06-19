@@ -32,3 +32,14 @@ def test_index_links_manifest_and_theme(client):
     html = client.get("/").text
     assert 'rel="manifest"' in html
     assert 'name="theme-color"' in html
+
+
+def test_notify_button_present(client):
+    assert 'id="btn-notify"' in client.get("/").text
+
+
+def test_app_js_wires_push(client):
+    js = client.get("/static/app.js").text
+    assert "/api/push/key" in js
+    assert "pushManager.subscribe" in js
+    assert "/sw.js" in js
