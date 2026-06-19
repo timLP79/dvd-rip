@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS rips (
     status TEXT NOT NULL,
     error TEXT,
     source TEXT NOT NULL DEFAULT 'rip',
-    disc_format TEXT NOT NULL DEFAULT 'dvd'
+    disc_format TEXT NOT NULL DEFAULT 'dvd',
+    aspect TEXT
 );
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -75,6 +76,7 @@ def _row_to_record(row: sqlite3.Row) -> RipRecord:
         error=row["error"],
         source=row["source"],
         disc_format=row["disc_format"],
+        aspect=row["aspect"],
     )
 
 
@@ -141,6 +143,8 @@ class Library:
                 conn.execute(
                     "ALTER TABLE rips ADD COLUMN disc_format TEXT NOT NULL DEFAULT 'dvd'"
                 )
+            if "aspect" not in cols:
+                conn.execute("ALTER TABLE rips ADD COLUMN aspect TEXT")
 
     def record_rip(self, record: RipRecord) -> None:
         ct = record.content_type.value if isinstance(record.content_type, ContentType) else record.content_type
@@ -150,8 +154,9 @@ class Library:
             conn.execute(
                 """INSERT INTO rips (created_at, content_type, title, year, season,
                        episode, tmdb_id, output_path, encoder_mode, burn_forced,
-                       file_size_bytes, rip_seconds, status, error, source, disc_format)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       file_size_bytes, rip_seconds, status, error, source, disc_format,
+                       aspect)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     record.created_at or _now_iso(),
                     ct, record.title, record.year, record.season, record.episode,
@@ -159,6 +164,7 @@ class Library:
                     1 if record.burn_forced else 0,
                     record.file_size_bytes, record.rip_seconds, status,
                     record.error, record.source, record.disc_format,
+                    record.aspect,
                 ),
             )
 

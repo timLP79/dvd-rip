@@ -203,3 +203,38 @@ def test_push_subscription_remove(tmp_path):
     lib.add_subscription("https://push.example/abc", "k", "a")
     lib.remove_subscription("https://push.example/abc")
     assert lib.list_subscriptions() == []
+
+
+def test_aspect_roundtrips(tmp_path):
+    lib = _lib(tmp_path)
+    lib.record_rip(_movie(title="Wide", aspect="widescreen"))
+    lib.record_rip(_movie(title="Full", aspect="fullscreen"))
+    by_title = {r.title: r.aspect for r in lib.list_rips()}
+    assert by_title["Wide"] == "widescreen"
+    assert by_title["Full"] == "fullscreen"
+
+
+def test_aspect_defaults_none(tmp_path):
+    lib = _lib(tmp_path)
+    lib.record_rip(_movie(title="Legacy"))
+    assert lib.list_rips()[0].aspect is None
+
+
+def test_aspect_migration_on_preexisting_db(tmp_path):
+    import sqlite3
+    db = str(tmp_path / "library.db")
+    # The rips schema AS IT IS TODAY (before this task), i.e. no `aspect` column.
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """CREATE TABLE rips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
+            content_type TEXT NOT NULL, title TEXT NOT NULL, year INTEGER, season INTEGER,
+            episode INTEGER, tmdb_id INTEGER, output_path TEXT NOT NULL, encoder_mode TEXT,
+            burn_forced INTEGER NOT NULL DEFAULT 1, file_size_bytes INTEGER, rip_seconds INTEGER,
+            status TEXT NOT NULL, error TEXT, source TEXT NOT NULL DEFAULT 'rip',
+            disc_format TEXT NOT NULL DEFAULT 'dvd');"""
+    )
+    conn.commit(); conn.close()
+    lib = Library(db); lib.init_db()                 # must ALTER ADD COLUMN aspect
+    lib.record_rip(_movie(title="Migrated", aspect="widescreen"))
+    assert lib.list_rips()[0].aspect == "widescreen"

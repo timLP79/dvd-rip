@@ -143,6 +143,7 @@ class Ripper:
             encoder_mode=encoder_mode,
             burn_forced=burn_forced,
             disc_format=disc_format,
+            aspect=selection.aspect,
             status=JobStatus.QUEUED,
         )
         self._queue.put_nowait(job_id)

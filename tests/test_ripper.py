@@ -202,3 +202,19 @@ def test_is_busy_reflects_current_job():
     assert r.is_busy() is True
     r._current_job_id = None
     assert r.is_busy() is False
+
+
+def test_save_record_persists_aspect(tmp_path):
+    from app.library import Library
+    from app.models import (ContentType, EncoderMode, JobStatus, MovieMetadata, TitleSelection)
+    from app.ripper import Ripper
+
+    lib = Library(str(tmp_path / "library.db")); lib.init_db()
+    r = Ripper(device="/dev/null", output_root=tmp_path, library=lib)
+    job = r.enqueue(
+        selection=TitleSelection(index=1, audio_tracks=[1], subtitle_tracks=[], aspect="widescreen"),
+        encoder_mode=EncoderMode.QUALITY, content_type=ContentType.MOVIE,
+        movie=MovieMetadata(title="Wide Movie", year=2020),
+    )
+    r._save_record(job.id, JobStatus.DONE)
+    assert lib.list_rips()[0].aspect == "widescreen"

@@ -77,6 +77,7 @@ class TitleSelection(BaseModel):
     episode_number: Optional[int] = None   # TV episode number
     episode_title: Optional[str] = None    # TV episode title (informational only;
                                            # not used in filename per user's convention)
+    aspect: Optional[str] = None   # "widescreen" | "fullscreen" | None (from the scanned title)
 
 
 class RipRequest(BaseModel):
@@ -177,3 +178,4 @@ class RipRecord(BaseModel):
     error: Optional[str] = None
     source: str = "rip"                        # "rip" | "backfill"
     disc_format: str = "dvd"
+    aspect: Optional[str] = None
