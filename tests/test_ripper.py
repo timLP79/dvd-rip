@@ -155,3 +155,41 @@ def test_bluray_cancel_during_decrypt_marks_cancelled(tmp_path, monkeypatch):
     job_id_holder = {"id": job.id}
     asyncio.run(r._run_job(job.id))
     assert r.get(job.id).status == JobStatus.CANCELLED
+
+
+def test_save_record_fires_push(tmp_path):
+    import asyncio
+    from app.library import Library
+    from app.models import (
+        ContentType, EncoderMode, JobStatus, MovieMetadata, TitleSelection,
+    )
+    from app.ripper import Ripper
+
+    class FakePush:
+        enabled = True
+        def __init__(self):
+            self.records = []
+        async def notify(self, record):
+            self.records.append(record)
+            return 1
+
+    fake = FakePush()
+
+    async def scenario():
+        lib = Library(str(tmp_path / "library.db"))
+        lib.init_db()
+        r = Ripper(device="/dev/null", output_root=tmp_path, library=lib, push=fake)
+        job = r.enqueue(
+            selection=TitleSelection(index=1, audio_tracks=[1], subtitle_tracks=[]),
+            encoder_mode=EncoderMode.QUALITY,
+            content_type=ContentType.MOVIE,
+            movie=MovieMetadata(title="Inception", year=2010),
+        )
+        r._save_record(job.id, JobStatus.DONE)
+        await asyncio.sleep(0)  # let the fire-and-forget task run
+        return fake.records
+
+    records = asyncio.run(scenario())
+    assert len(records) == 1
+    assert records[0].title == "Inception"
+    assert records[0].status == JobStatus.DONE

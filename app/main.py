@@ -28,6 +28,7 @@ from .models import (
     TMDBMovieResult,
     TMDBTVResult,
 )
+from .push import PushSender
 from .ripper import Ripper
 from .tmdb import TMDBClient
 
@@ -61,12 +62,15 @@ async def lifespan(app: FastAPI):
         library.backfill(str(OUTPUT_ROOT))
     except Exception:
         logging.getLogger(__name__).exception("library backfill failed")
-    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT, library=library, scratch_dir=MAKEMKV_SCRATCH)
+    push = PushSender(library)
+    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT, library=library,
+                    scratch_dir=MAKEMKV_SCRATCH, push=push)
     await ripper.start()
     tmdb = TMDBClient()
     app.state.ripper = ripper
     app.state.tmdb = tmdb
     app.state.library = library
+    app.state.push = push
     try:
         yield
     finally:

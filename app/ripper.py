@@ -33,6 +33,7 @@ from .models import (
 from .library import Library
 from .paths import movie_path, tv_episode_path, unique_path
 from .presets import build_handbrake_args
+from .push import PushSender
 from . import bluray
 
 log = logging.getLogger(__name__)
@@ -51,11 +52,12 @@ class Ripper:
     """Owns the job queue, the worker task, and progress fanout."""
 
     def __init__(self, *, device: str, output_root: Path, library: Optional[Library] = None,
-                 scratch_dir: str = "/data/scratch"):
+                 scratch_dir: str = "/data/scratch", push: Optional[PushSender] = None):
         self.device = device
         self.output_root = output_root
         self.library = library
         self.scratch_dir = scratch_dir
+        self.push = push
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._jobs: dict[str, Job] = {}
         self._job_order: list[str] = []
@@ -412,6 +414,11 @@ class Ripper:
             self.library.record_rip(record)
         except Exception:
             log.exception("failed to record rip %s to library", job_id)
+        if self.push is not None and self.push.enabled:
+            try:
+                asyncio.get_running_loop().create_task(self.push.notify(record))
+            except RuntimeError:
+                pass  # no running loop (e.g. a unit test calling _save_record directly)
 
     def _update(self, job_id: str, **fields: object) -> None:
         job = self._jobs.get(job_id)
