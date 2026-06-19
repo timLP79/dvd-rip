@@ -118,6 +118,23 @@ class TMDBEpisode(BaseModel):
     runtime: Optional[int] = None
 
 
+# --- Web Push subscriptions --------------------------------------------------
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscription(BaseModel):
+    """A browser PushManager subscription, as POSTed by the client."""
+    endpoint: str
+    keys: PushSubscriptionKeys
+
+
+class PushUnsubscribe(BaseModel):
+    endpoint: str
+
+
 # --- Job tracking ------------------------------------------------------------
 
 class JobStatus(str, Enum):

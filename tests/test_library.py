@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.library import Library
-from app.models import ContentType, JobStatus, RipRecord
+from app.models import ContentType, JobStatus, RipRecord, PushSubscription
 
 
 def _lib(tmp_path) -> Library:
@@ -176,3 +176,30 @@ def test_find_existing_returns_empty_on_insufficient_identity(tmp_path):
     assert lib.find_existing(content_type=ContentType.MOVIE) == []
     # tv missing episode -> can't claim a dup (no silent NULL match)
     assert lib.find_existing(content_type=ContentType.TV, title="Deadwood", season=1) == []
+
+
+def test_push_subscription_crud(tmp_path):
+    lib = _lib(tmp_path)
+    lib.add_subscription("https://push.example/abc", "p256-key", "auth-key")
+    subs = lib.list_subscriptions()
+    assert len(subs) == 1
+    assert isinstance(subs[0], PushSubscription)
+    assert subs[0].endpoint == "https://push.example/abc"
+    assert subs[0].keys.p256dh == "p256-key"
+    assert subs[0].keys.auth == "auth-key"
+
+
+def test_push_subscription_upsert_is_idempotent(tmp_path):
+    lib = _lib(tmp_path)
+    lib.add_subscription("https://push.example/abc", "k1", "a1")
+    lib.add_subscription("https://push.example/abc", "k2", "a2")  # same endpoint
+    subs = lib.list_subscriptions()
+    assert len(subs) == 1
+    assert subs[0].keys.p256dh == "k2"
+
+
+def test_push_subscription_remove(tmp_path):
+    lib = _lib(tmp_path)
+    lib.add_subscription("https://push.example/abc", "k", "a")
+    lib.remove_subscription("https://push.example/abc")
+    assert lib.list_subscriptions() == []

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .models import ContentType, JobStatus, RipRecord
+from .models import ContentType, JobStatus, RipRecord, PushSubscription, PushSubscriptionKeys
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,13 @@ CREATE TABLE IF NOT EXISTS rips (
     error TEXT,
     source TEXT NOT NULL DEFAULT 'rip',
     disc_format TEXT NOT NULL DEFAULT 'dvd'
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 """
 
@@ -211,6 +218,33 @@ class Library:
         with self._connect() as conn:
             rows = conn.execute("SELECT output_path FROM rips").fetchall()
         return {r["output_path"] for r in rows}
+
+    def add_subscription(self, endpoint: str, p256dh: str, auth: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT(endpoint) DO UPDATE SET
+                       p256dh=excluded.p256dh, auth=excluded.auth""",
+                (endpoint, p256dh, auth, _now_iso()),
+            )
+
+    def list_subscriptions(self) -> list[PushSubscription]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT endpoint, p256dh, auth FROM push_subscriptions"
+            ).fetchall()
+        return [
+            PushSubscription(
+                endpoint=r["endpoint"],
+                keys=PushSubscriptionKeys(p256dh=r["p256dh"], auth=r["auth"]),
+            )
+            for r in rows
+        ]
+
+    def remove_subscription(self, endpoint: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
 
     def backfill(self, output_root: str) -> int:
         root = Path(output_root)
