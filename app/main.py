@@ -8,6 +8,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -51,6 +52,28 @@ ASSET_VERSION = secrets.token_hex(6)
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 AUTH_ENABLED = bool(APP_PASSWORD)
+
+# Web Push endpoints must point at a known browser push service. The server
+# POSTs to sub.endpoint via pywebpush, so an arbitrary endpoint is an SSRF
+# vector; restrict to the major services and cap how many we store.
+_ALLOWED_PUSH_HOST_SUFFIXES = (
+    "fcm.googleapis.com",
+    "push.services.mozilla.com",
+    "notify.windows.com",
+    "push.apple.com",
+)
+MAX_PUSH_SUBSCRIPTIONS = int(os.getenv("MAX_PUSH_SUBSCRIPTIONS", "50"))
+
+
+def _is_allowed_push_endpoint(endpoint: str) -> bool:
+    try:
+        u = urlparse(endpoint)
+    except ValueError:
+        return False
+    if u.scheme != "https" or not u.hostname:
+        return False
+    host = u.hostname.lower()
+    return any(host == s or host.endswith("." + s) for s in _ALLOWED_PUSH_HOST_SUFFIXES)
 SESSION_SECRET = os.getenv("SESSION_SECRET", "") or secrets.token_hex(32)
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
 AUTH_EXEMPT = {"/login", "/sw.js"}
@@ -302,7 +325,11 @@ async def api_push_key(request: Request) -> dict:
 
 @app.post("/api/push/subscribe")
 async def api_push_subscribe(sub: PushSubscription, request: Request) -> dict:
+    if not _is_allowed_push_endpoint(sub.endpoint):
+        raise HTTPException(status_code=400, detail="Unsupported push endpoint")
     library: Library = request.app.state.library
+    if len(library.list_subscriptions()) >= MAX_PUSH_SUBSCRIPTIONS:
+        raise HTTPException(status_code=429, detail="Too many push subscriptions")
     library.add_subscription(sub.endpoint, sub.keys.p256dh, sub.keys.auth)
     return {"ok": True}
 
