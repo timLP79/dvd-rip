@@ -1233,6 +1233,100 @@ git commit -m "docs(ops): make secrets helper and Tailscale phone-access setup"
 
 ---
 
+### Task 10: Harden push subscribe — endpoint allowlist + cap (SSRF mitigation)
+
+**Files:**
+- Modify: `app/main.py` (validate + cap in `api_push_subscribe`)
+- Modify: `tests/test_push_api.py` (use allowlisted endpoints; add rejection + cap tests)
+
+**Why:** `pywebpush` makes an outbound POST to whatever `sub.endpoint` is stored. An arbitrary endpoint is therefore a server-side request forgery (SSRF) vector that authentication alone does not fully close (a compromised/XSS'd authenticated client could still register one). Restrict stored endpoints to the major browser push services and cap how many can be stored. (Flagged by automated security review of the push endpoints.)
+
+**Interfaces:**
+- Consumes: `Library.list_subscriptions()` (Task 1), `PushSubscription` model.
+- Produces: `api_push_subscribe` now 400s on a non-allowlisted/non-HTTPS endpoint and 429s past `MAX_PUSH_SUBSCRIPTIONS`.
+
+- [ ] **Step 1: Update existing tests + add new ones** in `tests/test_push_api.py`. Change the endpoints used by `test_subscribe_then_unsubscribe` and `test_test_endpoint_counts_sends` from `"https://push.example/xyz"` / `"e1"` to allowlisted hosts (`"https://fcm.googleapis.com/fcm/send/xyz"`, `"https://fcm.googleapis.com/fcm/send/e1"`). Then add:
+
+```python
+def test_subscribe_rejects_unknown_endpoint(client):
+    bad = {"endpoint": "https://evil.example/inject",
+           "keys": {"p256dh": "p", "auth": "a"}}
+    assert client.post("/api/push/subscribe", json=bad).status_code == 400
+    # http (non-TLS) is also rejected
+    insecure = {"endpoint": "http://fcm.googleapis.com/fcm/send/x",
+                "keys": {"p256dh": "p", "auth": "a"}}
+    assert client.post("/api/push/subscribe", json=insecure).status_code == 400
+
+
+def test_subscribe_caps_count(client, monkeypatch):
+    from app import main as main_module
+    monkeypatch.setattr(main_module, "MAX_PUSH_SUBSCRIPTIONS", 2)
+    for n in "abc":
+        res = client.post("/api/push/subscribe", json={
+            "endpoint": f"https://fcm.googleapis.com/fcm/send/{n}",
+            "keys": {"p256dh": "p", "auth": "a"}})
+    assert res.status_code == 429  # the third one is rejected
+    assert len(main_module.app.state.library.list_subscriptions()) == 2
+```
+
+- [ ] **Step 2: Run to verify the new tests fail** — `.venv/bin/python -m pytest tests/test_push_api.py -k "reject or cap" -v` → FAIL (currently every endpoint is accepted).
+
+- [ ] **Step 3: Implement in `app/main.py`.** Add `from urllib.parse import urlparse` to the imports. Near the other module constants (after `ASSET_VERSION`):
+
+```python
+# Web Push endpoints must point at a known browser push service. The server
+# POSTs to sub.endpoint via pywebpush, so an arbitrary endpoint is an SSRF
+# vector; restrict to the major services and cap how many we store.
+_ALLOWED_PUSH_HOST_SUFFIXES = (
+    "fcm.googleapis.com",
+    "push.services.mozilla.com",
+    "notify.windows.com",
+    "push.apple.com",
+)
+MAX_PUSH_SUBSCRIPTIONS = int(os.getenv("MAX_PUSH_SUBSCRIPTIONS", "50"))
+
+
+def _is_allowed_push_endpoint(endpoint: str) -> bool:
+    try:
+        u = urlparse(endpoint)
+    except ValueError:
+        return False
+    if u.scheme != "https" or not u.hostname:
+        return False
+    host = u.hostname.lower()
+    return any(host == s or host.endswith("." + s) for s in _ALLOWED_PUSH_HOST_SUFFIXES)
+```
+
+Replace the body of `api_push_subscribe` with:
+
+```python
+@app.post("/api/push/subscribe")
+async def api_push_subscribe(sub: PushSubscription, request: Request) -> dict:
+    if not _is_allowed_push_endpoint(sub.endpoint):
+        raise HTTPException(status_code=400, detail="Unsupported push endpoint")
+    library: Library = request.app.state.library
+    if len(library.list_subscriptions()) >= MAX_PUSH_SUBSCRIPTIONS:
+        raise HTTPException(status_code=429, detail="Too many push subscriptions")
+    library.add_subscription(sub.endpoint, sub.keys.p256dh, sub.keys.auth)
+    return {"ok": True}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `.venv/bin/python -m pytest tests/test_push_api.py -v`
+Expected: PASS (the updated existing tests + the 2 new ones).
+
+- [ ] **Step 5: Run the full suite** — `.venv/bin/python -m pytest tests/ -q` → all green.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/main.py tests/test_push_api.py
+git commit -m "fix(security): allowlist + cap Web Push subscribe endpoints (SSRF)"
+```
+
+---
+
 ## Final Verification
 
 - [ ] `.venv/bin/python -m pytest tests/ -v` — full suite green.
