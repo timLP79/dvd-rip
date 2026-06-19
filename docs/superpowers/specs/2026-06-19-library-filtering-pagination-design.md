@@ -67,7 +67,7 @@ checkbox in the topbar. Controls (each wrapped in a `<label>` for a11y):
 - `#lib-search` — `<input type="search" placeholder="Search title…">`.
 - `#lib-type` — `<select>`: All / Movie / TV (values `all|movie|tv`).
 - `#lib-format` — `<select>`: All / DVD / Blu-ray (values `all|dvd|bluray`).
-- `#lib-status` — `<select>`: All / Done / Failed / Cancelled (values `all|done|failed|cancelled`), **default `done`**.
+- `#lib-status` — `<select>`: All / Done / Failed / Cancelled (values `all|done|failed|cancelled`), **default `done`**. This fully replaces the removed checkbox and is a superset of it: `All` = the old "show failed/cancelled" (everything visible), `Done` = old unchecked, and `Failed`/`Cancelled` isolate just those (which the checkbox could not do). Failure visibility is preserved, not lost.
 - `#lib-date-from`, `#lib-date-to` — `<input type="date">` (both optional).
 - `#lib-clear` — a "Clear filters" button/link resetting all controls to defaults.
 
