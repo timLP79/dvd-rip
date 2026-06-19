@@ -68,6 +68,10 @@ class Ripper:
         self._current_job_id: Optional[str] = None
         self._worker_task: Optional[asyncio.Task[None]] = None
         self._cancelling: set[str] = set()
+        # Strong refs to fire-and-forget push-notify tasks. asyncio keeps only a
+        # weak ref to tasks, so an un-retained create_task() can be garbage-collected
+        # mid-flight — silently dropping the notification before its send completes.
+        self._notify_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
         if self._worker_task is None or self._worker_task.done():
@@ -421,9 +425,14 @@ class Ripper:
             log.exception("failed to record rip %s to library", job_id)
         if self.push is not None and self.push.enabled:
             try:
-                asyncio.get_running_loop().create_task(self.push.notify(record))
+                task = asyncio.get_running_loop().create_task(self.push.notify(record))
             except RuntimeError:
                 pass  # no running loop (e.g. a unit test calling _save_record directly)
+            else:
+                # Retain a strong reference until the task finishes, else it can be
+                # garbage-collected before the send completes (asyncio weak-ref footgun).
+                self._notify_tasks.add(task)
+                task.add_done_callback(self._notify_tasks.discard)
 
     def _update(self, job_id: str, **fields: object) -> None:
         job = self._jobs.get(job_id)

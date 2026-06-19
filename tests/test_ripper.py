@@ -204,6 +204,50 @@ def test_is_busy_reflects_current_job():
     assert r.is_busy() is False
 
 
+def test_save_record_retains_notify_task_until_done(tmp_path):
+    # The fire-and-forget notify must hold a STRONG reference so the task isn't
+    # garbage-collected before its (network-bound) send completes — the documented
+    # asyncio.create_task weak-ref footgun that was silently dropping rip
+    # notifications. Retained immediately, discarded on completion.
+    import asyncio
+    import gc
+    from app.library import Library
+    from app.models import (
+        ContentType, EncoderMode, JobStatus, MovieMetadata, TitleSelection,
+    )
+    from app.ripper import Ripper
+
+    class SlowPush:
+        enabled = True
+        def __init__(self):
+            self.done = False
+        async def notify(self, record):
+            await asyncio.sleep(0.05)   # yields, like the real executor-bound send
+            self.done = True
+            return 1
+
+    push = SlowPush()
+
+    async def scenario():
+        lib = Library(str(tmp_path / "lib.db")); lib.init_db()
+        r = Ripper(device="/dev/null", output_root=tmp_path, library=lib, push=push)
+        job = r.enqueue(
+            selection=TitleSelection(index=1, audio_tracks=[1], subtitle_tracks=[]),
+            encoder_mode=EncoderMode.QUALITY, content_type=ContentType.MOVIE,
+            movie=MovieMetadata(title="X", year=2020),
+        )
+        r._save_record(job.id, JobStatus.DONE)
+        retained = len(r._notify_tasks)     # strong ref held before notify finishes
+        gc.collect()                        # an un-retained task could die here
+        await asyncio.sleep(0.1)            # let the slow notify complete
+        return retained, push.done, len(r._notify_tasks)
+
+    retained, done, remaining = asyncio.run(scenario())
+    assert retained == 1      # task was kept alive
+    assert done is True       # notify actually completed (not GC'd mid-flight)
+    assert remaining == 0     # cleaned up via done-callback
+
+
 def test_save_record_persists_aspect(tmp_path):
     from app.library import Library
     from app.models import (ContentType, EncoderMode, JobStatus, MovieMetadata, TitleSelection)
