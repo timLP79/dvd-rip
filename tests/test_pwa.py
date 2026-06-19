@@ -63,3 +63,29 @@ def test_mobile_library_reflow_present(client):
     js = client.get("/static/library.js").text
     assert "dataset.label" in js
     assert "lib-title" in js
+
+
+def test_library_filter_controls_present(client):
+    html = client.get("/library").text
+    for marker in (
+        'id="lib-search"', 'id="lib-type"', 'id="lib-format"', 'id="lib-status"',
+        'id="lib-date-from"', 'id="lib-date-to"', 'id="lib-clear"',
+        'id="lib-pager"', 'id="lib-prev"', 'id="lib-next"',
+    ):
+        assert marker in html, marker
+    assert 'value="done" selected' in html      # status defaults to Done
+    assert 'id="show-failed"' not in html        # old checkbox removed
+
+
+def test_library_filter_styles_present(client):
+    css = client.get("/static/style.css").text
+    assert ".lib-filters" in css
+    assert ".lib-pager" in css
+
+
+def test_library_js_filter_paginate_logic(client):
+    js = client.get("/static/library.js").text
+    assert "PAGE_SIZE" in js
+    assert "include_unsuccessful=true" in js
+    assert "function matches" in js
+    assert "No rips match your filters" in js

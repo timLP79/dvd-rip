@@ -19,20 +19,54 @@
       <a class="nav-link" href="/">Rip</a>
       <a class="nav-link active" href="/library">Library</a>
     </nav>
-    <div class="topbar-actions">
-      <label class="opt"><input type="checkbox" id="show-failed" /> <span>Show failed/cancelled</span></label>
-    </div>
+    <div class="topbar-actions"></div>
   </header>
 
   <main>
     <section class="panel">
       <div class="section-head"><h2>Library</h2><span id="lib-count" class="rip-status"></span></div>
+
+      <div class="lib-filters">
+        <label class="lib-field"><span>Search</span>
+          <input type="search" id="lib-search" placeholder="Title, year, S01E03…" /></label>
+        <label class="lib-field"><span>Type</span>
+          <select id="lib-type">
+            <option value="all">All</option>
+            <option value="movie">Movie</option>
+            <option value="tv">TV</option>
+          </select></label>
+        <label class="lib-field"><span>Format</span>
+          <select id="lib-format">
+            <option value="all">All</option>
+            <option value="dvd">DVD</option>
+            <option value="bluray">Blu-ray</option>
+          </select></label>
+        <label class="lib-field"><span>Status</span>
+          <select id="lib-status">
+            <option value="all">All</option>
+            <option value="done" selected>Done</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select></label>
+        <label class="lib-field"><span>From</span>
+          <input type="date" id="lib-date-from" /></label>
+        <label class="lib-field"><span>To</span>
+          <input type="date" id="lib-date-to" /></label>
+        <button type="button" id="lib-clear" class="ghost">Clear filters</button>
+      </div>
+
       <table id="library" class="titles">
         <thead>
           <tr><th>Title</th><th>Ripped</th><th>Size</th><th>Duration</th><th>Encoder</th><th>Status</th></tr>
         </thead>
         <tbody id="library-body"></tbody>
       </table>
+
+      <div class="lib-pager" id="lib-pager" hidden>
+        <button type="button" id="lib-prev" class="ghost">Prev</button>
+        <span id="lib-page-info"></span>
+        <button type="button" id="lib-next" class="ghost">Next</button>
+      </div>
     </section>
   </main>
 

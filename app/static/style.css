@@ -785,6 +785,11 @@ button.secondary:hover:not(:disabled) {
 
   /* Respect the notch / home indicator when installed. */
   main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+
+  /* Library filters stack full-width on phones. */
+  .lib-field { flex: 1 1 100%; }
+  #lib-clear { width: 100%; }
+  .lib-pager button { min-height: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -823,3 +828,50 @@ button.secondary:hover:not(:disabled) {
   border-radius: 999px;
   vertical-align: 2px;
 }
+
+/* ============================================================
+   Library filters + pager
+   ============================================================ */
+.lib-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.lib-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+.lib-field input,
+.lib-field select {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+}
+.lib-field input:focus,
+.lib-field select:focus { outline: none; border-color: var(--accent); }
+.lib-field input::placeholder { color: var(--text-faint); }
+#lib-clear { align-self: flex-end; }
+
+.lib-empty { text-align: center; color: var(--text-muted); padding: 24px 0; }
+
+.lib-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.lib-pager button[disabled] { opacity: 0.45; cursor: default; }
