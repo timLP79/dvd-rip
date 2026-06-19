@@ -110,6 +110,20 @@ dev: venv ## Run uvicorn locally with auto-reload (no docker)
 	OUTPUT_ROOT=$(OUTPUT_DIR) DVD_DEVICE=$(DVD_DEVICE) \
 		.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port $(PORT)
 
+.PHONY: secrets
+secrets: venv ## Print fresh SESSION_SECRET + VAPID keys for .env (phone push/auth)
+	@.venv/bin/python -c "import secrets, base64; \
+from py_vapid import Vapid01; \
+from cryptography.hazmat.primitives import serialization as s; \
+v=Vapid01(); v.generate_keys(); \
+priv=v.private_key.private_numbers().private_value.to_bytes(32,'big'); \
+pub=v.public_key.public_bytes(s.Encoding.X962, s.PublicFormat.UncompressedPoint); \
+b=lambda x: base64.urlsafe_b64encode(x).rstrip(b'=').decode(); \
+print('SESSION_SECRET='+secrets.token_hex(32)); \
+print('VAPID_PRIVATE_KEY='+b(priv)); \
+print('VAPID_PUBLIC_KEY='+b(pub)); \
+print('VAPID_SUBJECT=mailto:you@example.com')"
+
 .PHONY: venv
 venv: .venv/bin/python ## Create local Python venv with dev deps
 

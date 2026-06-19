@@ -275,3 +275,29 @@ DVDs are interlaced 720×480 (NTSC) or 720×576 (PAL). At those resolutions:
 - **AAC stereo + AC3/DTS passthrough** (two audio tracks per source track): the stereo
   AAC plays anywhere; the passthrough preserves the original 5.1 surround for AV receivers.
 - MP4 + faststart so Plex doesn't have to read the entire file before playback starts.
+
+## Phone access (track rips from your phone)
+
+The app is already LAN-reachable at `http://<host-ip>:8000`. To get a stable
+HTTPS address (required for installable PWA + Web Push) and optional off-LAN
+access, front it with Tailscale:
+
+1. Install Tailscale on the host and your phone; sign both into the same tailnet.
+   Enable MagicDNS + HTTPS certs in the Tailscale admin console.
+2. On the host, publish the app over HTTPS:
+   ```bash
+   tailscale serve --bg 8000
+   ```
+   It is now at `https://<host>.<tailnet>.ts.net` with a trusted cert. The raw
+   `:8000` port is never forwarded to the public internet.
+3. Generate secrets and put them in `.env`, then restart the container:
+   ```bash
+   make secrets   # paste the printed lines into .env
+   # also set APP_PASSWORD=<your password> in .env
+   ```
+4. On the phone, open the `https://…ts.net` URL, sign in, and tap **Enable
+   notifications** in the Jobs panel (optionally "Add to Home Screen" for an app
+   icon). You'll get a push when each rip finishes or fails.
+
+Security: access is gated by your tailnet **and** the shared password. Tighten
+further with Tailscale ACLs if you share your tailnet.
