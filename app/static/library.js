@@ -33,11 +33,18 @@ function label(r) {
   return r.year ? `${r.title} (${r.year})` : r.title;
 }
 
+function aspectLabel(a) {
+  if (a === 'widescreen') return 'Widescreen';
+  if (a === 'fullscreen') return 'Full screen';
+  return '—';
+}
+
 function readFilters() {
   return {
     search: $('#lib-search').value.trim().toLowerCase(),
     type: $('#lib-type').value,
     format: $('#lib-format').value,
+    aspect: $('#lib-aspect').value,
     status: $('#lib-status').value,
     dateFrom: $('#lib-date-from').value,
     dateTo: $('#lib-date-to').value,
@@ -48,6 +55,7 @@ function matches(r, f) {
   if (f.search && !label(r).toLowerCase().includes(f.search)) return false;
   if (f.type !== 'all' && r.content_type !== f.type) return false;
   if (f.format !== 'all' && r.disc_format !== f.format) return false;
+  if (f.aspect !== 'all' && r.aspect !== f.aspect) return false;
   if (f.status !== 'all' && r.status !== f.status) return false;
   const d = r.created_at ? r.created_at.slice(0, 10) : '';
   if (f.dateFrom && !(d && d >= f.dateFrom)) return false;
@@ -64,6 +72,7 @@ function rowEl(r) {
     { v: fmtDate(r.created_at), label: 'Ripped' },
     { v: fmtSize(r.file_size_bytes), label: 'Size' },
     { v: fmtDuration(r.rip_seconds), label: 'Duration' },
+    { v: aspectLabel(r.aspect), label: 'Aspect' },
     { v: r.encoder_mode || '—', label: 'Encoder' },
     { v: r.status, label: 'Status' },
   ];
@@ -81,7 +90,7 @@ function rowEl(r) {
 function emptyRow(msg) {
   const tr = document.createElement('tr');
   const td = document.createElement('td');
-  td.colSpan = 6;
+  td.colSpan = 7;
   td.className = 'lib-empty';
   td.textContent = msg;
   tr.appendChild(td);
@@ -140,7 +149,7 @@ async function load() {
 
 document.addEventListener('DOMContentLoaded', () => {
   $('#lib-search').addEventListener('input', resetToFirstPageAndRender);
-  for (const id of ['#lib-type', '#lib-format', '#lib-status', '#lib-date-from', '#lib-date-to']) {
+  for (const id of ['#lib-type', '#lib-format', '#lib-aspect', '#lib-status', '#lib-date-from', '#lib-date-to']) {
     $(id).addEventListener('change', resetToFirstPageAndRender);
   }
   $('#lib-prev').addEventListener('click', () => { if (page > 1) { page--; render(); } });
@@ -149,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#lib-search').value = '';
     $('#lib-type').value = 'all';
     $('#lib-format').value = 'all';
+    $('#lib-aspect').value = 'all';
     $('#lib-status').value = 'done';
     $('#lib-date-from').value = '';
     $('#lib-date-to').value = '';

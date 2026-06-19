@@ -41,6 +41,12 @@
             <option value="dvd">DVD</option>
             <option value="bluray">Blu-ray</option>
           </select></label>
+        <label class="lib-field"><span>Aspect</span>
+          <select id="lib-aspect">
+            <option value="all">All</option>
+            <option value="widescreen">Widescreen</option>
+            <option value="fullscreen">Full screen</option>
+          </select></label>
         <label class="lib-field"><span>Status</span>
           <select id="lib-status">
             <option value="all">All</option>
@@ -57,7 +63,7 @@
 
       <table id="library" class="titles">
         <thead>
-          <tr><th>Title</th><th>Ripped</th><th>Size</th><th>Duration</th><th>Encoder</th><th>Status</th></tr>
+          <tr><th>Title</th><th>Ripped</th><th>Size</th><th>Duration</th><th>Aspect</th><th>Encoder</th><th>Status</th></tr>
         </thead>
         <tbody id="library-body"></tbody>
       </table>

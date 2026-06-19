@@ -110,3 +110,16 @@ def test_app_js_renders_and_sends_aspect(client):
     assert "function aspectLabel" in js
     assert "dataset.aspect" in js
     assert "aspect: row.dataset.aspect" in js
+
+
+def test_library_has_aspect_column_and_filter(client):
+    html = client.get("/library").text
+    assert 'id="lib-aspect"' in html
+    assert "<th>Aspect</th>" in html
+
+
+def test_library_js_aspect_wiring(client):
+    js = client.get("/static/library.js").text
+    assert "function aspectLabel" in js
+    assert "lib-aspect" in js
+    assert "colSpan = 7" in js
