@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DVD Rip — Sign in</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}" />
+</head>
+<body>
+  <main style="max-width:340px;margin:18vh auto;padding:0 20px;">
+    <h1 class="brand-title">DVD Rip</h1>
+    <form method="post" action="/login" class="panel" style="display:flex;flex-direction:column;gap:12px;">
+      <label>Password
+        <input type="password" name="password" autofocus autocomplete="current-password" />
+      </label>
+      {% if error %}<p style="color:var(--warning,#d99c3a);font-size:13px;">{{ error }}</p>{% endif %}
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

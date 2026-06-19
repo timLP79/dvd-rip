@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
@@ -48,6 +49,12 @@ MAKEMKV_SCRATCH = os.getenv("MAKEMKV_SCRATCH", "/data/scratch")
 # any browser cache. New container → new token → forced refetch of JS/CSS.
 ASSET_VERSION = secrets.token_hex(6)
 
+APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+AUTH_ENABLED = bool(APP_PASSWORD)
+SESSION_SECRET = os.getenv("SESSION_SECRET", "") or secrets.token_hex(32)
+COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
+AUTH_EXEMPT = {"/login", "/sw.js"}
+
 BASE_DIR = Path(__file__).parent
 TEMPLATE_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
@@ -82,6 +89,50 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="DVD Rip", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def require_auth(request: Request, call_next):
+    if not AUTH_ENABLED:
+        return await call_next(request)
+    path = request.url.path
+    if path in AUTH_EXEMPT or path.startswith("/static/"):
+        return await call_next(request)
+    if request.session.get("authed"):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": "Authentication required"}, status_code=401)
+    return RedirectResponse("/login", status_code=303)
+
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    https_only=COOKIE_SECURE,
+    same_site="lax",
+    max_age=60 * 60 * 24 * 60,  # 60 days
+)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "login.html", {"asset_version": ASSET_VERSION, "error": None}
+    )
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    password = str(form.get("password", ""))
+    if AUTH_ENABLED and secrets.compare_digest(password, APP_PASSWORD):
+        request.session["authed"] = True
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request, "login.html",
+        {"asset_version": ASSET_VERSION, "error": "Incorrect password"},
+        status_code=401,
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
