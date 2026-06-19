@@ -38,6 +38,7 @@ class Title(BaseModel):
     chapter_count: int
     frame_width: int
     frame_height: int
+    aspect: Optional[str] = None   # "widescreen" | "fullscreen" | None
     audio_tracks: list[AudioTrack] = Field(default_factory=list)
     subtitle_tracks: list[SubtitleTrack] = Field(default_factory=list)
     is_main_feature: bool = False

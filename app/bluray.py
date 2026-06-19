@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from .dvd import classify_aspect
 from .models import AudioTrack, ScanResult, SubtitleTrack, Title
 
 log = logging.getLogger(__name__)
@@ -152,6 +153,7 @@ def parse_makemkv_info(robot_output: str) -> list[Title]:
             chapter_count=acc.chapter_count,
             frame_width=acc.frame_width,
             frame_height=acc.frame_height,
+            aspect=classify_aspect(acc.frame_width, acc.frame_height),
             audio_tracks=acc.audio,
             subtitle_tracks=acc.subs,
             is_main_feature=False,

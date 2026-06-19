@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.dvd import is_dvd_video, parse_handbrake_scan, parse_lsdvd_label, _safe_label
+from app.dvd import classify_aspect, is_dvd_video, parse_handbrake_scan, parse_lsdvd_label, _safe_label
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -92,3 +92,35 @@ def test_parse_lsdvd_label_missing():
 )
 def test_safe_label(raw, expected):
     assert _safe_label(raw) == expected
+
+
+def test_classify_aspect_widescreen_anamorphic():
+    assert classify_aspect(720, 480, 32, 27) == "widescreen"   # DAR 1.78
+
+
+def test_classify_aspect_fullscreen_anamorphic():
+    assert classify_aspect(720, 480, 8, 9) == "fullscreen"     # DAR 1.33
+
+
+def test_classify_aspect_square_ntsc_is_fullscreen():
+    assert classify_aspect(720, 480, 1, 1) == "fullscreen"     # DAR 1.5 < 1.56
+
+
+def test_classify_aspect_bluray_dims():
+    assert classify_aspect(1920, 1080) == "widescreen"          # DAR 1.78, default PAR 1:1
+
+
+def test_classify_aspect_missing_dims_is_none():
+    assert classify_aspect(0, 0) is None
+
+
+def test_classify_aspect_zero_par_is_none():
+    assert classify_aspect(720, 480, 1, 0) is None
+
+
+def test_parse_normal_disc_sets_aspect():
+    titles = parse_handbrake_scan(_read("scan_normal.txt"))
+    labels = {t.aspect for t in titles}
+    # scan_normal has a PAR 32:27 title (widescreen) and PAR 1:1 titles (fullscreen)
+    assert "widescreen" in labels
+    assert "fullscreen" in labels

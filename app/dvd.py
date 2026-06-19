@@ -20,6 +20,20 @@ log = logging.getLogger(__name__)
 _MAIN_FEATURE_MIN_SECONDS = 20 * 60
 
 
+def classify_aspect(width: int, height: int, par_num: int = 1, par_den: int = 1) -> Optional[str]:
+    """Classify a title's display aspect ratio into widescreen / fullscreen.
+
+    Display aspect = (width * PAR.num) / (height * PAR.den). DVDs store both 4:3 and
+    16:9 at 720x480 and differ only by PAR, so PAR is required for correctness; Blu-ray
+    has square pixels (PAR 1:1). Threshold 1.56 is the midpoint of 4:3 (1.333) and
+    16:9 (1.778). Returns None when dimensions/PAR are missing.
+    """
+    if not width or not height or not par_num or not par_den:
+        return None
+    dar = (width * par_num) / (height * par_den)
+    return "widescreen" if dar >= 1.56 else "fullscreen"
+
+
 @dataclass
 class ScannerCommands:
     """Indirection point so tests can inject fake subprocess output."""
@@ -120,6 +134,11 @@ def parse_handbrake_scan(stdout: str) -> list[Title]:
                 chapter_count=len(entry.get("ChapterList", []) or []),
                 frame_width=geometry.get("Width", 0),
                 frame_height=geometry.get("Height", 0),
+                aspect=classify_aspect(
+                    geometry.get("Width", 0), geometry.get("Height", 0),
+                    (geometry.get("PAR") or {}).get("Num", 1),
+                    (geometry.get("PAR") or {}).get("Den", 1),
+                ),
                 audio_tracks=audio,
                 subtitle_tracks=subs,
                 is_main_feature=(idx == main_feature),
