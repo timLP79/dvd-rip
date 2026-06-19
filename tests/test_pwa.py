@@ -43,3 +43,10 @@ def test_app_js_wires_push(client):
     assert "/api/push/key" in js
     assert "pushManager.subscribe" in js
     assert "/sw.js" in js
+
+
+def test_mobile_titles_reflow_present(client):
+    css = client.get("/static/style.css").text
+    assert "max-width: 480px" in css   # phone breakpoint added
+    assert "#titles thead" in css      # table-to-cards reflow
+    assert "col-duration::before" in css  # CSS-supplied row labels

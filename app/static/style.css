@@ -730,6 +730,35 @@ button.secondary:hover:not(:disabled) {
   .col-tracks { min-width: 0; }
 }
 
+@media (max-width: 480px) {
+  /* Stack the titles table into per-row cards. */
+  #titles thead { display: none; }
+  #titles, #titles tbody, #titles tr, #titles td { display: block; width: 100%; }
+  #titles tr.title-row {
+    border: 1px solid var(--border, #232733);
+    border-radius: var(--radius, 8px);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  #titles td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border: none;
+  }
+  #titles td.col-duration::before { content: "Duration"; color: var(--text-muted); }
+  #titles td.col-chapters::before { content: "Chapters"; color: var(--text-muted); }
+  #titles td.col-frame::before    { content: "Frame";    color: var(--text-muted); }
+
+  /* Comfortable tap targets. */
+  input[type="checkbox"] { width: 22px; height: 22px; }
+  button, .ghost { min-height: 40px; }
+
+  /* Respect the notch / home indicator when installed. */
+  main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
