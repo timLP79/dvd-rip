@@ -15,11 +15,17 @@ PUID ?= $(shell id -u)
 PGID ?= $(shell id -g)
 CDROM_GID ?= $(shell getent group cdrom 2>/dev/null | cut -d: -f3 || echo 24)
 
+# SCSI-generic node MakeMKV uses for the optical drive. Its /dev/sgN number shifts
+# across reboots/USB reconnects, so derive it from the drive's sysfs entry rather
+# than hardcoding (a stale value fails `make up` with "no such device"). Falls back
+# to /dev/sg1 (the compose default) if the drive isn't present.
+BD_SG_DEVICE ?= $(shell n=$$(ls /sys/block/$(notdir $(DVD_DEVICE))/device/scsi_generic/ 2>/dev/null | head -n1); if [ -n "$$n" ]; then echo /dev/$$n; else echo /dev/sg1; fi)
+
 # TMDB_API_KEY is intentionally NOT in COMPOSE_ENV: an empty Makefile value would
 # clobber whatever's in `.env` (docker compose substitutes the shell env first).
 # Instead, let docker compose read it from `.env` or your exported shell env.
 COMPOSE_ENV := OUTPUT_DIR=$(OUTPUT_DIR) DVD_DEVICE=$(DVD_DEVICE) \
-	PUID=$(PUID) PGID=$(PGID) CDROM_GID=$(CDROM_GID)
+	PUID=$(PUID) PGID=$(PGID) CDROM_GID=$(CDROM_GID) BD_SG_DEVICE=$(BD_SG_DEVICE)
 COMPOSE := $(COMPOSE_ENV) docker compose
 SERVICE := dvd-rip
 
@@ -36,6 +42,7 @@ help: ## Show this help
 	@printf "  PUID          uid to run the container as     [%s]\n" "$(PUID)"
 	@printf "  PGID          gid to run the container as     [%s]\n" "$(PGID)"
 	@printf "  CDROM_GID     host cdrom group gid            [%s]\n" "$(CDROM_GID)"
+	@printf "  BD_SG_DEVICE  optical drive SCSI-generic node [%s]\n" "$(BD_SG_DEVICE)"
 
 .PHONY: build
 build: ## Build the docker image
