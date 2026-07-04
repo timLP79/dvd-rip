@@ -244,7 +244,8 @@ def test_audiobook_path_single_disc(tmp_path):
 
 def test_sanitize_normalizes_unicode_punct():
     from app.paths import sanitize
-    assert sanitize("It’s a “Test”…") == "It's a Test..."
+    assert sanitize("It’s a “Test”…") == "It's a Test"   # trailing dots stripped (SMB-safe)
+    assert sanitize("Wait… what") == "Wait... what"        # mid-string ellipsis preserved
     assert sanitize("Two—Rooms") == "Two-Rooms"
 ```
 
@@ -939,6 +940,8 @@ async def test_rip_disc_removes_written_files_on_failure(tmp_path):
                        scratch_dir=str(tmp_path / "scratch"), spawn=flaky_spawn)
     # First (successful) track file was rolled back — no partial garbage.
     assert not list((tmp_path / "Music").rglob("*.flac"))
+    # Scratch WAVs are swept even on the failure path (both modes).
+    assert not list((tmp_path / "scratch").glob("*.wav"))
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1055,6 +1058,8 @@ async def rip_disc(
                 register_proc=register_proc)
             if rc != 0:
                 raise RipError(f"cdparanoia failed on track {t.number} (rc={rc})\n{out}".strip())
+            wavs.append(wav)   # track now so the finally-sweep cleans it in BOTH modes,
+                               # even if the flac encode below raises mid-track
 
             if mode == "music":
                 out_path = unique_path(music_path(
@@ -1070,9 +1075,7 @@ async def rip_disc(
                 if rc != 0:
                     raise RipError(f"flac failed on track {t.number} (rc={rc})\n{out}".strip())
                 written.append(out_path)
-                wav.unlink(missing_ok=True)
-            else:
-                wavs.append(wav)
+                wav.unlink(missing_ok=True)   # immediate; finally-sweep is idempotent (missing_ok)
 
         if mode == "audiobook":
             if on_stage:
