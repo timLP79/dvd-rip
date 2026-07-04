@@ -17,11 +17,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
+from . import cd
 from .bluray import detect_and_scan as bluray_detect_and_scan
 from .dvd import is_dvd_video, scan
 from .library import Library
 from .models import (
     ContentType,
+    CDRipRequest,
     Job,
     PushSubscription,
     PushUnsubscribe,
@@ -32,6 +34,7 @@ from .models import (
     TMDBMovieResult,
     TMDBTVResult,
 )
+from .musicbrainz import MusicBrainzClient
 from .push import PushSender
 from .ripper import Ripper
 from .tmdb import TMDBClient
@@ -99,8 +102,10 @@ async def lifespan(app: FastAPI):
                     scratch_dir=MAKEMKV_SCRATCH, push=push)
     await ripper.start()
     tmdb = TMDBClient()
+    musicbrainz = MusicBrainzClient()
     app.state.ripper = ripper
     app.state.tmdb = tmdb
+    app.state.musicbrainz = musicbrainz
     app.state.library = library
     app.state.push = push
     try:
@@ -108,6 +113,7 @@ async def lifespan(app: FastAPI):
     finally:
         await ripper.stop()
         await tmdb.aclose()
+        await musicbrainz.aclose()
 
 
 app = FastAPI(title="DVD Rip", lifespan=lifespan)
@@ -196,6 +202,10 @@ async def api_scan(request: Request) -> ScanResult:
     ripper: Ripper = request.app.state.ripper
     if ripper.is_busy():
         raise HTTPException(status_code=409, detail="Rip in progress; disc scan unavailable")
+    # Audio CD is the cheapest, most specific probe (libdiscid, ~1s). A data
+    # DVD/BD makes discid.read raise, so this falls through to the video paths.
+    if await cd.is_audio_cd(DVD_DEVICE):
+        return await cd.scan(DVD_DEVICE, mb_client=request.app.state.musicbrainz)
     # Route DVDs straight to the DVD scanner: a quick lsdvd probe avoids running
     # makemkvcon (the Blu-ray detector) on a disc it would never rip. Only non-DVD
     # discs go to makemkvcon-based Blu-ray detection.
@@ -260,6 +270,17 @@ async def api_rip(payload: RipRequest, request: Request) -> dict:
         )
         job_ids.append(job.id)
     return {"job_ids": job_ids}
+
+
+@app.post("/api/cd/rip")
+async def api_cd_rip(payload: CDRipRequest, request: Request) -> dict:
+    if not any(t.include for t in payload.tracks):
+        raise HTTPException(status_code=400, detail="No tracks selected")
+    if not payload.creator.strip() or not payload.title.strip():
+        raise HTTPException(status_code=400, detail="creator and title are required")
+    ripper: Ripper = request.app.state.ripper
+    job = ripper.enqueue_cd(request=payload)
+    return {"job_ids": [job.id]}
 
 
 @app.get("/api/library", response_model=list[RipRecord])
