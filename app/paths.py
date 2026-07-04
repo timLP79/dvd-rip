@@ -22,6 +22,15 @@ from typing import Optional
 _FORBIDDEN_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# MusicBrainz titles carry typographic punctuation; map to filesystem-safe ASCII
+# BEFORE stripping forbidden chars (straight double-quote is itself forbidden).
+_UNICODE_MAP = str.maketrans({
+    "‘": "'", "’": "'",   # curly single quotes -> straight apostrophe
+    "“": "", "”": "",     # curly double quotes -> drop
+    "–": "-", "—": "-",   # en/em dash -> hyphen
+    "…": "...",                # ellipsis -> ...
+})
+
 
 def sanitize(name: str) -> str:
     """Make `name` safe as a filesystem component.
@@ -33,24 +42,9 @@ def sanitize(name: str) -> str:
     - Strips leading/trailing dots and spaces (Windows trims those silently).
     - Never returns the empty string; falls back to 'Untitled'.
     """
-    # Preserve ellipsis using a marker so it survives the dot-stripping step
-    ELLIPSIS_MARKER = "__ELLIPSIS__"
-    cleaned = name.replace("…", ELLIPSIS_MARKER)
-
-    # Normalize other Unicode punctuation first, before stripping forbidden chars
-    # (straight double-quote is itself forbidden).
-    cleaned = cleaned.replace(""", "")  # Left double quote -> nothing
-    cleaned = cleaned.replace(""", "")  # Right double quote -> nothing
-    cleaned = cleaned.replace("'", "'")  # Left single quote -> apostrophe
-    cleaned = cleaned.replace("'", "'")  # Right single quote -> apostrophe
-    cleaned = cleaned.replace("–", "-")  # En dash -> hyphen
-    cleaned = cleaned.replace("—", "-")  # Em dash -> hyphen
-
+    cleaned = name.translate(_UNICODE_MAP)
     cleaned = _FORBIDDEN_RE.sub("", cleaned)
     cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip().strip(".")
-
-    # Restore ellipsis after all sanitization
-    cleaned = cleaned.replace(ELLIPSIS_MARKER, "...")
     return cleaned or "Untitled"
 
 

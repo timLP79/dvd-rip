@@ -118,5 +118,6 @@ def test_audiobook_path_single_disc(tmp_path):
 
 def test_sanitize_normalizes_unicode_punct():
     from app.paths import sanitize
-    assert sanitize('It\'s a "Test"…') == "It's a Test..."
+    assert sanitize("It’s a “Test”…") == "It's a Test"   # trailing dots stripped (SMB-safe)
+    assert sanitize("Wait… what") == "Wait... what"        # mid-string ellipsis preserved
     assert sanitize("Two—Rooms") == "Two-Rooms"
