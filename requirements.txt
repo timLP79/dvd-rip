@@ -7,3 +7,4 @@ python-multipart==0.0.12
 httpx==0.27.2
 pywebpush>=1.14,<3
 itsdangerous==2.2.0
+discid==1.4.1
