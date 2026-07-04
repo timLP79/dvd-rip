@@ -180,6 +180,7 @@ async def rip_disc(
                 register_proc=register_proc)
             if rc != 0:
                 raise RipError(f"cdparanoia failed on track {t.number} (rc={rc})\n{out}".strip())
+            wavs.append(wav)
 
             if mode == "music":
                 out_path = unique_path(music_path(
@@ -196,8 +197,6 @@ async def rip_disc(
                     raise RipError(f"flac failed on track {t.number} (rc={rc})\n{out}".strip())
                 written.append(out_path)
                 wav.unlink(missing_ok=True)
-            else:
-                wavs.append(wav)
 
         if mode == "audiobook":
             if on_stage:

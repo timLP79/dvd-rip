@@ -176,3 +176,5 @@ async def test_rip_disc_removes_written_files_on_failure(tmp_path):
                        scratch_dir=str(tmp_path / "scratch"), spawn=flaky_spawn)
     # First (successful) track file was rolled back — no partial garbage.
     assert not list((tmp_path / "Music").rglob("*.flac"))
+    # Scratch WAVs are swept even on the failure path (both modes).
+    assert not list((tmp_path / "scratch").glob("*.wav"))
