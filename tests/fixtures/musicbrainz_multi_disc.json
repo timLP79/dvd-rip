@@ -1,0 +1,28 @@
+{
+  "id": "DISCID5OF9",
+  "releases": [
+    {
+      "id": "rel-1",
+      "title": "Fragile Things: Short Fictions and Wonders",
+      "date": "2006",
+      "artist-credit": [{"name": "Neil Gaiman", "joinphrase": "",
+                          "artist": {"name": "Neil Gaiman"}}],
+      "media": [
+        {"position": 1, "track-count": 8, "discs": [{"id": "OTHERDISC1"}], "tracks": []},
+        {"position": 2, "track-count": 9, "discs": [{"id": "OTHERDISC2"}], "tracks": []},
+        {"position": 3, "track-count": 8, "discs": [{"id": "OTHERDISC3"}], "tracks": []},
+        {"position": 4, "track-count": 7, "discs": [{"id": "OTHERDISC4"}], "tracks": []},
+        {"position": 5, "track-count": 3, "discs": [{"id": "DISCID5OF9"}],
+         "tracks": [
+           {"number": "1", "title": "The Fourth Room", "length": 343000},
+           {"number": "2", "title": "Strange Little Girls", "length": 565000},
+           {"number": "3", "title": "Locks", "length": 234000}
+         ]},
+        {"position": 6, "track-count": 9, "discs": [{"id": "OTHERDISC6"}], "tracks": []},
+        {"position": 7, "track-count": 7, "discs": [{"id": "OTHERDISC7"}], "tracks": []},
+        {"position": 8, "track-count": 8, "discs": [{"id": "OTHERDISC8"}], "tracks": []},
+        {"position": 9, "track-count": 10, "discs": [{"id": "OTHERDISC9"}], "tracks": []}
+      ]
+    }
+  ]
+}

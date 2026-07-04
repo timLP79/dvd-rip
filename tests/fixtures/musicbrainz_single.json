@@ -1,0 +1,19 @@
+{
+  "id": "SINGLEDISC",
+  "releases": [
+    {
+      "id": "rel-2",
+      "title": "OK Computer",
+      "date": "1997-05-21",
+      "artist-credit": [{"name": "Radiohead", "joinphrase": "",
+                          "artist": {"name": "Radiohead"}}],
+      "media": [
+        {"position": 1, "track-count": 2, "discs": [{"id": "SINGLEDISC"}],
+         "tracks": [
+           {"number": "1", "title": "Airbag", "length": 284000},
+           {"number": "2", "title": "Paranoid Android", "length": 383000}
+         ]}
+      ]
+    }
+  ]
+}
