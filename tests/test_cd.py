@@ -57,3 +57,122 @@ async def test_scan_survives_musicbrainz_failure():
     sr = await cd.scan("/dev/sr0", read_disc=lambda dev: GAIMAN_D5, mb_client=BrokenMB())
     assert sr.musicbrainz == []          # TOC still returned
     assert len(sr.tracks) == 8
+
+
+import wave
+from pathlib import Path
+
+from app.cd import flac_args, lame_args, rip_disc
+from app.models import CDTrackSelection
+
+
+def test_flac_args_carry_tags(tmp_path):
+    args = flac_args(tmp_path / "in.wav", tmp_path / "out.flac", artist="Radiohead",
+                     album="OK Computer", title="Airbag", track_number=1,
+                     track_total=12, date=1997)
+    assert args[0] == "flac"
+    assert "--tag=ARTIST=Radiohead" in args
+    assert "--tag=ALBUMARTIST=Radiohead" in args
+    assert "--tag=TITLE=Airbag" in args
+    assert "--tag=TRACKNUMBER=1" in args
+    assert "--tag=TRACKTOTAL=12" in args
+    assert "--tag=DATE=1997" in args
+    assert args[-1] == str(tmp_path / "in.wav")
+
+
+def test_lame_args_carry_disc_tags(tmp_path):
+    args = lame_args(tmp_path / "j.wav", tmp_path / "out.mp3", artist="Neil Gaiman",
+                     title="Fragile Things", album="Fragile Things",
+                     disc_number=5, total_discs=9, year=2006)
+    assert args[0] == "lame"
+    assert "--ta" in args and "Neil Gaiman" in args
+    assert "--tl" in args and "Fragile Things" in args
+    i = args.index("--tv")
+    assert args[i + 1] == "TPOS=5/9"
+    assert args[-2:] == [str(tmp_path / "j.wav"), str(tmp_path / "out.mp3")]
+
+
+def _fake_wav(path, seconds=1):
+    """A minimal valid CDDA-format WAV so _concat_wavs (real) can join them."""
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100)
+        w.writeframes(b"\x00\x00\x00\x00" * (44100 * seconds))
+
+
+def _out_path(cmd):
+    """The file a fake tool 'produces': cdparanoia/lame write the LAST arg;
+    flac writes the arg after -o (its last arg is the INPUT wav)."""
+    if cmd[0] == "flac":
+        return cmd[cmd.index("-o") + 1]
+    return cmd[-1]
+
+
+def _spawn_factory(recorder):
+    """Fake spawn: records the argv, fabricates the file the tool would write."""
+    async def fake_spawn(cmd, *, register_proc=None):
+        recorder.append(cmd)
+        if cmd[0] == "cdparanoia":
+            _fake_wav(Path(_out_path(cmd)))     # valid WAV so the real join works
+        else:                                    # flac/lame -> create the output file
+            Path(_out_path(cmd)).write_bytes(b"encoded")
+        return 0, ""
+    return fake_spawn
+
+
+@pytest.mark.asyncio
+async def test_rip_disc_music_writes_one_file_per_track(tmp_path):
+    cmds = []
+    tracks = [CDTrackSelection(number=1, title="Airbag"),
+              CDTrackSelection(number=2, title="Paranoid Android"),
+              CDTrackSelection(number=3, title="", include=False)]
+    written = await rip_disc(
+        "/dev/sr0", mode="music", output_root=tmp_path, creator="Radiohead",
+        title="OK Computer", year=1997, disc_number=1, total_discs=None,
+        tracks=tracks, scratch_dir=str(tmp_path / "scratch"),
+        spawn=_spawn_factory(cmds))
+    assert len(written) == 2                                   # track 3 excluded
+    assert (tmp_path / "Music" / "Radiohead" / "OK Computer" / "01 - Airbag.flac").exists()
+    assert not list((tmp_path / "scratch").glob("*.wav"))      # wavs cleaned up
+    assert [c[0] for c in cmds] == ["cdparanoia", "flac", "cdparanoia", "flac"]
+
+
+@pytest.mark.asyncio
+async def test_rip_disc_audiobook_joins_to_one_file(tmp_path):
+    cmds = []
+    tracks = [CDTrackSelection(number=n) for n in range(1, 5)]
+    progress = []
+    written = await rip_disc(
+        "/dev/sr0", mode="audiobook", output_root=tmp_path, creator="Neil Gaiman",
+        title="Fragile Things", year=2006, disc_number=5, total_discs=9,
+        tracks=tracks, scratch_dir=str(tmp_path / "scratch"),
+        on_progress=progress.append, spawn=_spawn_factory(cmds))
+    assert len(written) == 1
+    assert written[0].name == "Fragile Things, Disc 05.mp3"
+    assert written[0].exists()
+    # 4 cdparanoia extracts + exactly one lame encode
+    assert [c[0] for c in cmds].count("cdparanoia") == 4
+    assert [c[0] for c in cmds].count("lame") == 1
+    assert progress[-1] == 100
+    assert not list((tmp_path / "scratch").glob("*.wav"))
+
+
+@pytest.mark.asyncio
+async def test_rip_disc_removes_written_files_on_failure(tmp_path):
+    calls = {"n": 0}
+    async def flaky_spawn(cmd, *, register_proc=None):
+        if cmd[0] == "cdparanoia":
+            _fake_wav(Path(_out_path(cmd)))
+            return 0, ""
+        calls["n"] += 1
+        if calls["n"] == 2:                      # second flac encode fails
+            return 1, "flac: disk full"
+        Path(_out_path(cmd)).write_bytes(b"x")   # first flac writes its real output
+        return 0, ""
+    tracks = [CDTrackSelection(number=1, title="A"), CDTrackSelection(number=2, title="B")]
+    with pytest.raises(Exception):
+        await rip_disc("/dev/sr0", mode="music", output_root=tmp_path,
+                       creator="Art", title="Alb", year=None, disc_number=1,
+                       total_discs=None, tracks=tracks,
+                       scratch_dir=str(tmp_path / "scratch"), spawn=flaky_spawn)
+    # First (successful) track file was rolled back — no partial garbage.
+    assert not list((tmp_path / "Music").rglob("*.flac"))
