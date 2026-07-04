@@ -29,12 +29,13 @@ from .models import (
     RipRecord,
     TitleSelection,
     TVMetadata,
+    CDRipRequest,
 )
 from .library import Library
-from .paths import movie_path, tv_episode_path, unique_path
+from .paths import audiobook_path, movie_path, sanitize, tv_episode_path, unique_path
 from .presets import build_handbrake_args
 from .push import PushSender
-from . import bluray
+from . import bluray, cd
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class Ripper:
         self._job_order: list[str] = []
         self._selections: dict[str, tuple[TitleSelection, EncoderMode, str, bool, str]] = {}
         self._records: dict[str, RipRecord] = {}
+        self._cd_requests: dict[str, CDRipRequest] = {}
         self._subscribers: dict[str, list[asyncio.Queue[Job]]] = {}
         self._current_process: Optional[asyncio.subprocess.Process] = None
         self._current_job_id: Optional[str] = None
@@ -154,6 +156,34 @@ class Ripper:
         self._trim_finished()
         return job
 
+    def enqueue_cd(self, *, request: CDRipRequest) -> Job:
+        # Display path = the album/book folder (one disc = one queue job).
+        if request.mode == "audiobook":
+            folder = audiobook_path(
+                self.output_root, author=request.creator, book=request.title,
+                disc_number=request.disc_number, total_discs=request.total_discs).parent
+        else:
+            folder = self.output_root / "Music" / sanitize(request.creator) / sanitize(request.title)
+        job_id = secrets.token_hex(6)
+        job = Job(id=job_id, title_index=request.disc_number,
+                  output_path=str(folder), status=JobStatus.QUEUED)
+        self._jobs[job_id] = job
+        self._job_order.append(job_id)
+        self._cd_requests[job_id] = request
+        self._subscribers[job_id] = []
+        self._records[job_id] = RipRecord(
+            content_type=ContentType(request.mode),
+            title=request.title,
+            artist=request.creator,
+            year=request.year,
+            output_path=str(folder),
+            disc_format="cd",
+            status=JobStatus.QUEUED,
+        )
+        self._queue.put_nowait(job_id)
+        self._trim_finished()
+        return job
+
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
@@ -215,6 +245,9 @@ class Ripper:
                 self._save_record(job_id, JobStatus.FAILED, error=str(exc))
 
     async def _run_job(self, job_id: str) -> None:
+        if job_id in self._cd_requests:
+            await self._run_cd_job(job_id)
+            return
         selection, encoder_mode, output_path, burn_forced, disc_format = self._selections[job_id]
         started = time.monotonic()
         if disc_format == "bluray":
@@ -343,6 +376,47 @@ class Ripper:
                 except OSError:
                     pass
 
+    async def _run_cd_job(self, job_id: str) -> None:
+        request = self._cd_requests[job_id]
+        started = time.monotonic()
+        self._update(job_id, status=JobStatus.RUNNING, phase="Starting", percent=0.0)
+        self._current_job_id = job_id
+        try:
+            written = await cd.rip_disc(
+                self.device, mode=request.mode, output_root=self.output_root,
+                creator=request.creator, title=request.title, year=request.year,
+                disc_number=request.disc_number, total_discs=request.total_discs,
+                tracks=request.tracks, scratch_dir=self.scratch_dir,
+                on_progress=lambda p: self._update(job_id, percent=p),
+                on_stage=lambda s: self._update(job_id, phase=s),
+                register_proc=lambda pr: setattr(self, "_current_process", pr),
+            )
+        except Exception as exc:
+            self._current_process = None
+            self._current_job_id = None
+            _sweep_scratch_wavs(self.scratch_dir)
+            if job_id in self._cancelling or self._jobs[job_id].status == JobStatus.CANCELLED:
+                self._update(job_id, status=JobStatus.CANCELLED, phase=None)
+                self._save_record(job_id, JobStatus.CANCELLED)
+            else:
+                msg = str(exc)
+                self._update(job_id, status=JobStatus.FAILED, phase=None, error=msg)
+                self._save_record(job_id, JobStatus.FAILED, error=msg)
+            return
+        finally:
+            self._cancelling.discard(job_id)
+        self._current_process = None
+        self._current_job_id = None
+        elapsed = int(time.monotonic() - started)
+        record = self._records.get(job_id)
+        if record is not None:
+            try:
+                record.file_size_bytes = sum(p.stat().st_size for p in written)
+            except OSError:
+                record.file_size_bytes = None
+        self._update(job_id, status=JobStatus.DONE, phase=None, percent=100.0)
+        self._save_record(job_id, JobStatus.DONE, rip_seconds=elapsed)
+
     async def _consume_progress(
         self,
         job_id: str,
@@ -414,7 +488,7 @@ class Ripper:
         record.status = status
         record.error = error
         record.rip_seconds = rip_seconds
-        if status is JobStatus.DONE:
+        if status is JobStatus.DONE and record.file_size_bytes is None:
             try:
                 record.file_size_bytes = os.path.getsize(record.output_path)
             except OSError:
@@ -458,6 +532,7 @@ class Ripper:
             self._selections.pop(jid, None)
             self._records.pop(jid, None)
             self._subscribers.pop(jid, None)
+            self._cd_requests.pop(jid, None)
             try:
                 self._job_order.remove(jid)
             except ValueError:
@@ -484,6 +559,15 @@ def _sweep_scratch(scratch_dir: str) -> None:
     try:
         for mkv in Path(scratch_dir).glob("*.mkv"):
             mkv.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _sweep_scratch_wavs(scratch_dir: str) -> None:
+    """Remove leftover .wav files from a failed/cancelled CD rip."""
+    try:
+        for wav in Path(scratch_dir).glob("*.wav"):
+            wav.unlink(missing_ok=True)
     except OSError:
         pass
 

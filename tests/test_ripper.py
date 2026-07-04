@@ -262,3 +262,71 @@ def test_save_record_persists_aspect(tmp_path):
     )
     r._save_record(job.id, JobStatus.DONE)
     assert lib.list_rips()[0].aspect == "widescreen"
+
+
+def test_enqueue_cd_seeds_record_and_job(tmp_path):
+    from app.library import Library
+    from app.models import CDRipRequest, CDTrackSelection, ContentType
+    from app.ripper import Ripper
+    lib = Library(str(tmp_path / "lib.db")); lib.init_db()
+    r = Ripper(device="/dev/sr0", output_root=tmp_path, library=lib)
+    job = r.enqueue_cd(request=CDRipRequest(
+        mode="audiobook", creator="Neil Gaiman", title="Fragile Things",
+        disc_number=5, total_discs=9, tracks=[CDTrackSelection(number=1)]))
+    assert job.id in r._cd_requests
+    rec = r._records[job.id]
+    assert rec.content_type == ContentType.AUDIOBOOK
+    assert rec.artist == "Neil Gaiman"
+    assert rec.disc_format == "cd"
+    assert "Fragile Things" in job.output_path
+
+
+def test_run_cd_job_calls_rip_disc_and_records(tmp_path, monkeypatch):
+    import asyncio
+    from app import cd
+    from app.library import Library
+    from app.models import CDRipRequest, CDTrackSelection, JobStatus
+    from app.ripper import Ripper
+
+    async def fake_rip_disc(device, **kw):
+        out = tmp_path / "Audiobooks" / "Neil Gaiman" / "Fragile Things" / "Fragile Things, Disc 05.mp3"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"x" * 99)
+        if kw.get("on_progress"):
+            kw["on_progress"](100)
+        return [out]
+
+    monkeypatch.setattr(cd, "rip_disc", fake_rip_disc)
+    lib = Library(str(tmp_path / "lib.db")); lib.init_db()
+    r = Ripper(device="/dev/sr0", output_root=tmp_path, library=lib,
+               scratch_dir=str(tmp_path / "scratch"))
+    job = r.enqueue_cd(request=CDRipRequest(
+        mode="audiobook", creator="Neil Gaiman", title="Fragile Things",
+        disc_number=5, total_discs=9, tracks=[CDTrackSelection(number=1)]))
+    asyncio.run(r._run_job(job.id))
+    assert r.get(job.id).status == JobStatus.DONE
+    rows = lib.list_rips()
+    assert rows[0].artist == "Neil Gaiman"
+    assert rows[0].file_size_bytes == 99
+
+
+def test_run_cd_job_failure_marks_failed_and_cleans(tmp_path, monkeypatch):
+    import asyncio
+    from app import cd
+    from app.library import Library
+    from app.models import CDRipRequest, CDTrackSelection, JobStatus
+    from app.ripper import Ripper
+
+    async def boom_rip(device, **kw):
+        raise cd.RipError("cdparanoia failed on track 3\nscratched disc")
+
+    monkeypatch.setattr(cd, "rip_disc", boom_rip)
+    lib = Library(str(tmp_path / "lib.db")); lib.init_db()
+    r = Ripper(device="/dev/sr0", output_root=tmp_path, library=lib,
+               scratch_dir=str(tmp_path / "scratch"))
+    job = r.enqueue_cd(request=CDRipRequest(
+        mode="music", creator="Art", title="Alb",
+        tracks=[CDTrackSelection(number=1)]))
+    asyncio.run(r._run_job(job.id))
+    assert r.get(job.id).status == JobStatus.FAILED
+    assert "scratched disc" in (r.get(job.id).error or "")
