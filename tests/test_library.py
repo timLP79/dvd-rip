@@ -238,3 +238,41 @@ def test_aspect_migration_on_preexisting_db(tmp_path):
     lib = Library(db); lib.init_db()                 # must ALTER ADD COLUMN aspect
     lib.record_rip(_movie(title="Migrated", aspect="widescreen"))
     assert lib.list_rips()[0].aspect == "widescreen"
+
+
+def test_record_and_read_artist(tmp_path):
+    from app.library import Library
+    from app.models import ContentType, JobStatus, RipRecord
+    lib = Library(str(tmp_path / "lib.db"))
+    lib.init_db()
+    lib.record_rip(RipRecord(
+        content_type=ContentType.AUDIOBOOK, title="Fragile Things",
+        artist="Neil Gaiman", output_path=str(tmp_path / "book"),
+        status=JobStatus.DONE))
+    rows = lib.list_rips()
+    assert rows[0].artist == "Neil Gaiman"
+    assert rows[0].content_type == ContentType.AUDIOBOOK
+
+
+def test_artist_column_added_to_legacy_db(tmp_path):
+    """A pre-artist DB upgrades in place without data loss."""
+    import sqlite3
+    db = str(tmp_path / "legacy.db")
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE rips (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,"
+        " content_type TEXT NOT NULL, title TEXT NOT NULL, year INTEGER, season INTEGER,"
+        " episode INTEGER, tmdb_id INTEGER, output_path TEXT NOT NULL, encoder_mode TEXT,"
+        " burn_forced INTEGER NOT NULL DEFAULT 1, file_size_bytes INTEGER, rip_seconds INTEGER,"
+        " status TEXT NOT NULL, error TEXT, source TEXT NOT NULL DEFAULT 'rip',"
+        " disc_format TEXT NOT NULL DEFAULT 'dvd', aspect TEXT);")
+    conn.execute("INSERT INTO rips (created_at, content_type, title, output_path, status)"
+                 " VALUES ('2020-01-01','movie','Old Movie','/x','done')")
+    conn.commit(); conn.close()
+
+    from app.library import Library
+    lib = Library(db)
+    lib.init_db()                       # must ALTER TABLE ADD COLUMN artist
+    rows = lib.list_rips()
+    assert rows[0].title == "Old Movie"
+    assert rows[0].artist is None
