@@ -339,3 +339,11 @@ def test_cd_rip_rejects_blank_metadata(client):
         "tracks": [{"number": 1, "include": True}],
     })
     assert res.status_code == 400
+
+
+def test_index_includes_cd_panel_markup(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    assert 'id="cd-section"' in res.text
+    assert 'id="cd-track-body"' in res.text
+    assert 'id="btn-cd-rip"' in res.text

@@ -875,3 +875,8 @@ button.secondary:hover:not(:disabled) {
   color: var(--text-muted);
 }
 .lib-pager button[disabled] { opacity: 0.45; cursor: default; }
+
+.cd-release-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+#cd-tracks .cd-track-title { width: 100%; }
+#cd-tracks .cd-num, #cd-tracks .cd-dur { white-space: nowrap; }
+#cd-audiobook-note { margin: 8px 0 0; font-size: 0.9em; }
