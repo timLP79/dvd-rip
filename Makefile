@@ -17,9 +17,11 @@ CDROM_GID ?= $(shell getent group cdrom 2>/dev/null | cut -d: -f3 || echo 24)
 
 # SCSI-generic node MakeMKV uses for the optical drive. Its /dev/sgN number shifts
 # across reboots/USB reconnects, so derive it from the drive's sysfs entry rather
-# than hardcoding (a stale value fails `make up` with "no such device"). Falls back
-# to /dev/sg1 (the compose default) if the drive isn't present.
-BD_SG_DEVICE ?= $(shell n=$$(ls /sys/block/$(notdir $(DVD_DEVICE))/device/scsi_generic/ 2>/dev/null | head -n1); if [ -n "$$n" ]; then echo /dev/$$n; else echo /dev/sg1; fi)
+# than hardcoding (a stale value fails `make up` with "no such device"). This must be
+# the exact sysfs name: the container shares the host sysfs and MakeMKV opens that same
+# path (see docker-compose.yml). Falls back to /dev/sg0 (the compose default) if the
+# drive isn't present.
+BD_SG_DEVICE ?= $(shell n=$$(ls /sys/block/$(notdir $(DVD_DEVICE))/device/scsi_generic/ 2>/dev/null | head -n1); if [ -n "$$n" ]; then echo /dev/$$n; else echo /dev/sg0; fi)
 
 # TMDB_API_KEY is intentionally NOT in COMPOSE_ENV: an empty Makefile value would
 # clobber whatever's in `.env` (docker compose substitutes the shell env first).

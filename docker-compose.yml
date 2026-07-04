@@ -7,9 +7,14 @@ services:
     devices:
       - "${DVD_DEVICE:-/dev/sr0}:/dev/sr0"
       # MakeMKV (Blu-ray) reads the drive through its SCSI-generic node, not /dev/sr0.
-      # Map the host's matching /dev/sgN. Find it with:
-      #   ls /sys/block/sr0/device/scsi_generic/
-      - "${BD_SG_DEVICE:-/dev/sg1}:/dev/sg1"
+      # The container shares the HOST sysfs, so MakeMKV derives the sg node name from
+      # /sys/block/sr0/device/scsi_generic/ (a host name, e.g. sg0) and opens that exact
+      # path. The container node must therefore match the host node — map BD_SG_DEVICE to
+      # the SAME path on both sides, never a fixed target. A hardcoded target (e.g. sg1)
+      # breaks whenever the host enumerates the drive as a different /dev/sgN (which shifts
+      # across reboots/USB reconnects). BD_SG_DEVICE is auto-detected by the Makefile.
+      #   ls /sys/block/sr0/device/scsi_generic/   # shows the host sg name
+      - "${BD_SG_DEVICE:-/dev/sg0}:${BD_SG_DEVICE:-/dev/sg0}"
     volumes:
       - "${OUTPUT_DIR:-./output}:/output"
       - "${DATA_DIR:-./data}:/data"
