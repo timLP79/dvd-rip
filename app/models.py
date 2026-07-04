@@ -16,6 +16,8 @@ class EncoderMode(str, Enum):
 class ContentType(str, Enum):
     MOVIE = "movie"
     TV = "tv"
+    MUSIC = "music"
+    AUDIOBOOK = "audiobook"
 
 
 class AudioTrack(BaseModel):
@@ -44,10 +46,30 @@ class Title(BaseModel):
     is_main_feature: bool = False
 
 
+class CDTrack(BaseModel):
+    number: int
+    duration_seconds: int
+    title: Optional[str] = None
+
+
+class MBRelease(BaseModel):
+    """One MusicBrainz release candidate matched by exact disc ID."""
+    artist: str
+    album: str
+    year: Optional[int] = None
+    disc_position: Optional[int] = None   # which disc this is (1-based)
+    total_discs: Optional[int] = None     # media count of the release
+    tracks: list[CDTrack] = Field(default_factory=list)
+
+
 class ScanResult(BaseModel):
     dvd_label: str
-    titles: list[Title]
-    disc_format: Literal["dvd", "bluray"] = "dvd"
+    titles: list[Title] = Field(default_factory=list)
+    disc_format: Literal["dvd", "bluray", "cd"] = "dvd"
+    # Audio-CD fields (empty for video discs):
+    tracks: list[CDTrack] = Field(default_factory=list)
+    disc_id: Optional[str] = None
+    musicbrainz: list[MBRelease] = Field(default_factory=list)
 
 
 class MovieMetadata(BaseModel):
@@ -92,6 +114,23 @@ class RipRequest(BaseModel):
     movie: Optional[MovieMetadata] = None
     tv: Optional[TVMetadata] = None
     titles: list[TitleSelection]
+
+
+class CDTrackSelection(BaseModel):
+    number: int
+    title: str = ""
+    include: bool = True
+
+
+class CDRipRequest(BaseModel):
+    mode: Literal["music", "audiobook"]
+    disc_id: Optional[str] = None
+    creator: str                      # Artist (music) / Author (audiobook)
+    title: str                        # Album (music) / Book (audiobook)
+    year: Optional[int] = None
+    disc_number: int = 1
+    total_discs: Optional[int] = None
+    tracks: list[CDTrackSelection]
 
 
 # --- TMDB search results -----------------------------------------------------
@@ -165,6 +204,7 @@ class RipRecord(BaseModel):
     created_at: Optional[str] = None          # ISO-8601; set at record time if None
     content_type: ContentType
     title: str                                 # movie title OR show name
+    artist: Optional[str] = None               # Artist/Author for music/audiobook rows
     year: Optional[int] = None
     season: Optional[int] = None
     episode: Optional[int] = None
