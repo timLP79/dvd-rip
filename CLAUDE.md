@@ -102,6 +102,7 @@ Module map (all in `app/`):
 | `tmdb.py` | Async TMDB client (search movie/tv, season-episode list) — optional, gated on `TMDB_API_KEY` |
 | `musicbrainz.py` | Async MusicBrainz client — **exact disc-ID lookup only** (no fuzzy TOC); returns candidate releases + `is_audiobook` (release-group secondary type). No API key; parallels `tmdb.py` |
 | `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out; dispatches DVD / Blu-ray / CD jobs; records each terminal job to the library |
+| `scan_coordinator.py` | Serializes `/api/scan` (one scan at a time → 409 on overlap) and cancels an in-flight scan by killing the live drive subprocess |
 | `library.py` | SQLite rip ledger — `record_rip`/`list_rips`/`find_existing` + `/output` backfill; additive migrations (`artist` column for music/audiobook). The only module that touches SQL |
 | `models.py` | Pydantic models shared across API and worker (incl. `CDTrack`/`MBRelease`/`CDRipRequest`) |
 | `static/`, `templates/` | UI (no build step — Jinja2 + vanilla JS + IBM Plex Sans/Mono fonts); `index.html`/`app.js` include the CD panel, `library.html`/`library.js` the ledger view |
