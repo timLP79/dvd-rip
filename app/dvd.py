@@ -41,13 +41,15 @@ class ScannerCommands:
     lsdvd: list[str]
 
 
-async def _spawn(cmd: list[str], timeout: float = 120.0) -> tuple[int, str, str]:
+async def _spawn(cmd: list[str], timeout: float = 120.0, *, register_proc=None) -> tuple[int, str, str]:
     """Run a command via argv (no shell) and capture output."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    if register_proc is not None:
+        register_proc(proc)
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
@@ -164,7 +166,7 @@ def _safe_label(raw: str) -> str:
     return cleaned.strip("._-") or "UNKNOWN_DVD"
 
 
-async def is_dvd_video(device: str, *, _run: Callable = _spawn) -> bool:
+async def is_dvd_video(device: str, *, _run: Callable = _spawn, register_proc=None) -> bool:
     """Fast probe: is the inserted disc a DVD-Video?
 
     Lets the scan endpoint route DVDs straight to the DVD scanner instead of first
@@ -172,8 +174,9 @@ async def is_dvd_video(device: str, *, _run: Callable = _spawn) -> bool:
     DVD it will never rip. `lsdvd` reads only the DVD's VIDEO_TS structure — a
     second or two — and exits non-zero on a Blu-ray or data disc.
     """
+    kwargs = {} if register_proc is None else {"register_proc": register_proc}
     try:
-        rc, stdout, _ = await _run(["lsdvd", device], timeout=15.0)
+        rc, stdout, _ = await _run(["lsdvd", device], timeout=15.0, **kwargs)
     except (FileNotFoundError, asyncio.TimeoutError):
         return False
     return rc == 0 and "Disc Title:" in stdout
@@ -183,6 +186,7 @@ async def scan(
     device: str,
     *,
     commands: Optional[ScannerCommands] = None,
+    register_proc=None,
 ) -> ScanResult:
     """Run the scan tools against `device` and return a ScanResult.
 
@@ -196,7 +200,7 @@ async def scan(
 
     titles: list[Title] = []
     try:
-        rc, stdout, stderr = await _spawn(cmds.handbrake)
+        rc, stdout, stderr = await _spawn(cmds.handbrake, register_proc=register_proc)
         if rc != 0:
             log.warning("HandBrakeCLI scan returned %s: %s", rc, stderr.strip()[:500])
         titles = parse_handbrake_scan(stdout)
@@ -207,7 +211,7 @@ async def scan(
 
     label = "UNKNOWN_DVD"
     try:
-        rc, stdout, _ = await _spawn(cmds.lsdvd, timeout=15.0)
+        rc, stdout, _ = await _spawn(cmds.lsdvd, timeout=15.0, register_proc=register_proc)
         if rc == 0:
             label = parse_lsdvd_label(stdout)
     except (FileNotFoundError, asyncio.TimeoutError):

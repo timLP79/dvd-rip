@@ -144,3 +144,17 @@ def test_detect_and_scan_none_when_bluray_text_but_no_titles():
     async def fake_run(cmd, timeout=0):
         return 0, 'CINFO:1,6209,"Blu-ray disc"\nTCOUNT:0', ""
     assert asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run)) is None
+
+
+def test_detect_and_scan_forwards_register_proc():
+    captured = {}
+
+    async def fake_run(cmd, timeout=0, register_proc=None):
+        captured["rp"] = register_proc
+        return (0, "Blu-ray disc detected", "")
+
+    def reg(proc):
+        pass
+
+    asyncio.run(detect_and_scan("/dev/sr0", _run=fake_run, register_proc=reg))
+    assert captured["rp"] is reg
