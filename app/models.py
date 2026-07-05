@@ -59,6 +59,7 @@ class MBRelease(BaseModel):
     year: Optional[int] = None
     disc_position: Optional[int] = None   # which disc this is (1-based)
     total_discs: Optional[int] = None     # media count of the release
+    is_audiobook: bool = False            # MB release-group secondary type = Audiobook/Spokenword
     tracks: list[CDTrack] = Field(default_factory=list)
 
 

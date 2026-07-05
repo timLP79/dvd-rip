@@ -62,12 +62,17 @@ def _release_to_mbrelease(disc_id: str, release: dict) -> MBRelease:
         )
         for i, t in enumerate(matched.get("tracks") or [])
     ]
+    # An exact-hit release tagged Audiobook/Spokenword is a reliable "this is an
+    # audiobook" signal — enough to default the UI mode (a MISS is not, hence manual).
+    rg = release.get("release-group") or {}
+    secondary = {s.lower() for s in (rg.get("secondary-types") or [])}
     return MBRelease(
         artist=_artist_name(release.get("artist-credit")),
         album=release.get("title") or "Unknown Album",
         year=_year(release.get("date")),
         disc_position=matched.get("position"),
         total_discs=len(media) or None,
+        is_audiobook=bool(secondary & {"audiobook", "spokenword"}),
         tracks=tracks,
     )
 
@@ -90,7 +95,7 @@ class MusicBrainzClient:
         try:
             resp = await self._client.get(
                 f"{_BASE_URL}/{disc_id}",
-                params={"inc": "recordings+artist-credits", "fmt": "json"},
+                params={"inc": "recordings+artist-credits+release-groups", "fmt": "json"},
                 headers={"User-Agent": self.user_agent},
             )
             resp.raise_for_status()

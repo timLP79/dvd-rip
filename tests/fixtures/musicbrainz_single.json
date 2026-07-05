@@ -5,6 +5,7 @@
       "id": "rel-2",
       "title": "OK Computer",
       "date": "1997-05-21",
+      "release-group": {"primary-type": "Album", "secondary-types": []},
       "artist-credit": [{"name": "Radiohead", "joinphrase": "",
                           "artist": {"name": "Radiohead"}}],
       "media": [

@@ -31,6 +31,7 @@ async def test_lookup_multi_disc_extracts_position_and_tracks():
     assert r.year == 2006
     assert r.disc_position == 5
     assert r.total_discs == 9
+    assert r.is_audiobook is True          # release-group secondary type "Audiobook"
     assert [t.number for t in r.tracks] == [1, 2, 3]
     assert r.tracks[0].title == "The Fourth Room"
     assert r.tracks[0].duration_seconds == 343  # 343000 ms -> s
@@ -47,6 +48,7 @@ async def test_lookup_single_disc():
     assert releases[0].year == 1997
     assert releases[0].disc_position == 1
     assert releases[0].total_discs == 1
+    assert releases[0].is_audiobook is False   # a music album, not an audiobook
 
 
 @pytest.mark.asyncio

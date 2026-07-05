@@ -448,6 +448,13 @@ function renderCDPanel(scan) {
       picker.appendChild(b);
     });
   }
+  // Default to Audiobook when MusicBrainz tags the release as one (secondary type),
+  // so a matched audiobook disc doesn't open in Music mode.
+  const wantAudiobook = releases.length > 0 && !!releases[0].is_audiobook;
+  const modeEl = document.querySelector(
+    `input[name="cd_mode"][value="${wantAudiobook ? 'audiobook' : 'music'}"]`);
+  if (modeEl) modeEl.checked = true;
+
   applyCDRelease(scan, 0);
   applyCDModeLabels();
 }
