@@ -93,7 +93,7 @@ Module map (all in `app/`):
 
 | File | Responsibility |
 |---|---|
-| `main.py` | FastAPI routes (`/api/scan` routes CD→DVD→Blu-ray, `/api/search`, `/api/rip`, `/api/cd/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
+| `main.py` | FastAPI routes (`/api/scan` routes CD→DVD→Blu-ray, `/api/scan/cancel`, `/api/search`, `/api/rip`, `/api/cd/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
 | `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult`; `is_dvd_video()` fast lsdvd probe so DVDs skip makemkvcon |
 | `bluray.py` | MakeMKV front-end — detect BD, scan titles, decrypt a title to a temp MKV (the only module that touches `makemkvcon`) |
 | `cd.py` | Audio-CD ripping (the only module touching `libdiscid`/`cdparanoia`/`flac`/`lame`) — detection + TOC scan, and the per-track rip loop (`cdparanoia`→WAV, then `flac`/`lame`). Music → per-track FLAC; audiobook → one joined MP3/disc, or split-by-MusicBrainz into per-title MP3s. Within-track progress via WAV-size polling |
