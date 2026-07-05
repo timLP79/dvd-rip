@@ -880,3 +880,4 @@ button.secondary:hover:not(:disabled) {
 #cd-tracks .cd-track-title { width: 100%; }
 #cd-tracks .cd-num, #cd-tracks .cd-dur { white-space: nowrap; }
 #cd-audiobook-note { margin: 8px 0 0; font-size: 0.9em; }
+.cd-trim { display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap; }

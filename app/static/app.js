@@ -487,6 +487,8 @@ function applyCDModeLabels() {
   $('#cd-disc-num-field').hidden = !audiobook;
   $('#cd-total-discs-field').hidden = !audiobook;
   $('#cd-audiobook-note').hidden = !audiobook;
+  $('#cd-tracks').hidden = audiobook;          // never render the (up to 99-row) table for audiobook
+  $('#cd-audiobook-trim').hidden = !audiobook;
   $('#btn-cd-rip').textContent = audiobook ? 'Rip Disc' : 'Rip Album';
 }
 
@@ -496,6 +498,13 @@ function collectCDRequest() {
     title: row.querySelector('.cd-track-title').value.trim(),
     include: row.querySelector('.cd-pick').checked,
   }));
+  if (cdMode() === 'audiobook') {
+    const skipFirst = $('#cd-skip-first').checked;
+    const skipLast = $('#cd-skip-last').checked;
+    tracks.forEach((t, i) => {
+      t.include = !((skipFirst && i === 0) || (skipLast && i === tracks.length - 1));
+    });
+  }
   const total = $('#cd-total-discs').value;
   return {
     mode: cdMode(),

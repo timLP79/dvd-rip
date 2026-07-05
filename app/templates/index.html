@@ -139,8 +139,12 @@
         <tbody id="cd-track-body"></tbody>
       </table>
       <p id="cd-audiobook-note" class="muted" hidden>
-        Audiobook mode joins the whole disc into one MP3. Uncheck a track only to trim a publisher intro/outro.
+        Audiobook mode joins the whole disc into one MP3 — use the options below to skip a publisher intro/outro.
       </p>
+      <div id="cd-audiobook-trim" class="cd-trim" hidden>
+        <label><input type="checkbox" id="cd-skip-first" /> Skip first track (publisher intro)</label>
+        <label><input type="checkbox" id="cd-skip-last" /> Skip last track</label>
+      </div>
 
       <div class="actions">
         <span id="cd-rip-status" class="rip-status"></span>
