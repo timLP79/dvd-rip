@@ -106,6 +106,66 @@
       </div>
     </section>
 
+    <section id="cd-section" class="panel" hidden>
+      <div class="section-head">
+        <h2 id="cd-disc-label">Audio CD</h2>
+        <div class="content-type-toggle" role="radiogroup" aria-label="CD mode">
+          <label><input type="radio" name="cd_mode" value="music" checked /> <span>Music</span></label>
+          <label><input type="radio" name="cd_mode" value="audiobook" /> <span>Audiobook</span></label>
+        </div>
+      </div>
+
+      <div id="cd-release-picker" class="cd-release-picker" hidden></div>
+
+      <div class="manual-grid">
+        <label><span id="cd-creator-label">Artist</span>
+          <input id="cd-creator" type="text" placeholder="Artist" /></label>
+        <label><span id="cd-title-label">Album</span>
+          <input id="cd-title" type="text" placeholder="Album" /></label>
+        <label>Year <input id="cd-year" type="number" min="1900" max="2100" /></label>
+        <label id="cd-disc-num-field" hidden>Disc #
+          <input id="cd-disc-number" type="number" min="1" value="1" /></label>
+        <label id="cd-total-discs-field" hidden>Total discs
+          <input id="cd-total-discs" type="number" min="1" /></label>
+      </div>
+
+      <label id="cd-split-field" class="cd-split" hidden>
+        <input type="checkbox" id="cd-split" checked />
+        Split into tracks — save each MusicBrainz title as its own file
+      </label>
+
+      <table id="cd-tracks" class="titles">
+        <thead>
+          <tr>
+            <th class="col-pick"><input id="cd-select-all" type="checkbox" checked title="Include all" /></th>
+            <th>#</th><th>Title</th><th>Duration</th>
+          </tr>
+        </thead>
+        <tbody id="cd-track-body"></tbody>
+      </table>
+      <p id="cd-audiobook-note" class="muted" hidden>
+        Audiobook mode joins the whole disc into one MP3 — use the options below to skip a publisher intro/outro.
+      </p>
+      <div id="cd-audiobook-trim" class="cd-trim" hidden>
+        <label><input type="checkbox" id="cd-skip-first" /> Skip first track (publisher intro)</label>
+        <label><input type="checkbox" id="cd-skip-last" /> Skip last track</label>
+      </div>
+
+      <div class="actions">
+        <span id="cd-rip-status" class="rip-status"></span>
+        <button id="btn-cd-rip" type="button">Rip Disc</button>
+      </div>
+    </section>
+
+    <template id="cd-track-row-tpl">
+      <tr class="cd-track-row">
+        <td class="col-pick"><input type="checkbox" class="cd-pick" checked /></td>
+        <td class="cd-num"></td>
+        <td><input type="text" class="cd-track-title" /></td>
+        <td class="cd-dur"></td>
+      </tr>
+    </template>
+
     <section id="jobs-section" class="panel">
       <div class="section-head">
         <h2>Jobs</h2>

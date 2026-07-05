@@ -9,8 +9,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # but the Ubuntu 24.04 universe HandBrakeCLI is recent enough.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
+        cdparanoia \
+        flac \
         gosu \
         handbrake-cli \
+        lame \
+        libdiscid0 \
         libdvd-pkg \
         libdvdread8t64 \
         libdvdnav4 \

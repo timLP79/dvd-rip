@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.paths import movie_path, sanitize, tv_episode_path, unique_path
+from app.paths import audiobook_path, movie_path, music_path, sanitize, tv_episode_path, unique_path
 
 
 def test_movie_path_with_year(tmp_path):
@@ -77,3 +77,63 @@ def test_unique_path_appends_counter(tmp_path):
     assert unique_path(path).name == "movie_2.mp4"
     (tmp_path / "movie_2.mp4").write_text("")
     assert unique_path(path).name == "movie_3.mp4"
+
+
+def test_music_path_single_disc(tmp_path):
+    p = music_path(tmp_path, artist="Radiohead", album="OK Computer",
+                   disc_number=1, total_discs=None, track_number=2,
+                   track_title="Paranoid Android")
+    assert p == (tmp_path / "Music" / "Radiohead" / "OK Computer"
+                 / "02 - Paranoid Android.flac")
+
+
+def test_music_path_multi_disc_prefixes(tmp_path):
+    p = music_path(tmp_path, artist="The Wall", album="The Wall",
+                   disc_number=2, total_discs=2, track_number=3,
+                   track_title="Hey You")
+    assert p.name == "2-03 - Hey You.flac"
+
+
+def test_music_path_untitled_falls_back(tmp_path):
+    p = music_path(tmp_path, artist="A", album="B", disc_number=1,
+                   total_discs=None, track_number=7, track_title="[untitled]")
+    assert p.name == "07 - Track 07.flac"
+    p2 = music_path(tmp_path, artist="A", album="B", disc_number=1,
+                    total_discs=None, track_number=8, track_title="   ")
+    assert p2.name == "08 - Track 08.flac"
+
+
+def test_audiobook_path_multi_disc(tmp_path):
+    p = audiobook_path(tmp_path, author="Neil Gaiman", book="Fragile Things",
+                       disc_number=5, total_discs=9)
+    assert p == (tmp_path / "Audiobooks" / "Neil Gaiman" / "Fragile Things"
+                 / "Fragile Things, Disc 05.mp3")
+
+
+def test_audiobook_path_single_disc(tmp_path):
+    p = audiobook_path(tmp_path, author="Author", book="Novella",
+                       disc_number=1, total_discs=1)
+    assert p.name == "Novella.mp3"
+
+
+def test_audiobook_track_path_split(tmp_path):
+    from app.paths import audiobook_track_path
+    p = audiobook_track_path(tmp_path, author="Neil Gaiman", book="Fragile Things",
+                             disc_number=1, total_discs=9, track_number=2,
+                             track_title="The Mapmaker")
+    assert p == (tmp_path / "Audiobooks" / "Neil Gaiman" / "Fragile Things"
+                 / "1-02 - The Mapmaker.mp3")
+
+
+def test_audiobook_track_path_untitled_falls_back(tmp_path):
+    from app.paths import audiobook_track_path
+    p = audiobook_track_path(tmp_path, author="A", book="B", disc_number=1,
+                             total_discs=1, track_number=3, track_title="")
+    assert p.name == "03 - Track 03.mp3"
+
+
+def test_sanitize_normalizes_unicode_punct():
+    from app.paths import sanitize
+    assert sanitize("It’s a “Test”…") == "It's a Test"   # trailing dots stripped (SMB-safe)
+    assert sanitize("Wait… what") == "Wait... what"        # mid-string ellipsis preserved
+    assert sanitize("Two—Rooms") == "Two-Rooms"

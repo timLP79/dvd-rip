@@ -8,6 +8,7 @@ const state = {
   tmdbEnabled: document.body.dataset.tmdbEnabled === 'true',
   tvEpisodeMap: new Map(),   // title_index -> episode_number (user override)
   tvEpisodeTitles: new Map(),// title_index -> episode_title (TMDB-fetched, optional)
+  cdSplitAvailable: false,   // did MusicBrainz give per-track titles for this CD?
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -111,8 +112,14 @@ async function scan() {
     state.selectedMeta = null;
     state.tvEpisodeMap.clear();
     state.tvEpisodeTitles.clear();
+    $('#cd-section').hidden = true;
+    if (data.disc_format === 'cd') {
+      renderCDPanel(data);
+      status.hidden = true;
+      return;
+    }
     if (!data.titles.length) {
-      status.textContent = 'No titles found. Insert a DVD and click Rescan.';
+      status.textContent = 'No titles found. Insert a disc and click Rescan.';
       return;
     }
     renderDiscMeta(data);
@@ -414,6 +421,171 @@ function renderTitles(scan) {
   updateRipButton();
 }
 
+// ---------- Audio CD ----------
+
+function cdMode() {
+  const el = document.querySelector('input[name="cd_mode"]:checked');
+  return el ? el.value : 'music';
+}
+
+function renderCDPanel(scan) {
+  $('#disc-meta-section').hidden = true;
+  $('#titles-section').hidden = true;
+  $('#cd-section').hidden = false;
+  $('#cd-disc-label').textContent = 'Audio CD';
+
+  // Release picker when MusicBrainz returned >1 candidate.
+  const picker = $('#cd-release-picker');
+  picker.innerHTML = '';
+  const releases = scan.musicbrainz || [];
+  picker.hidden = releases.length <= 1;
+  if (releases.length > 1) {
+    releases.forEach((rel, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'secondary';
+      b.textContent = `${rel.artist} — ${rel.album}${rel.year ? ' (' + rel.year + ')' : ''}`;
+      b.addEventListener('click', () => { applyCDRelease(scan, i); applyCDModeLabels(); });
+      picker.appendChild(b);
+    });
+  }
+  // Default to Audiobook when MusicBrainz tags the release as one (secondary type),
+  // so a matched audiobook disc doesn't open in Music mode.
+  const wantAudiobook = releases.length > 0 && !!releases[0].is_audiobook;
+  const modeEl = document.querySelector(
+    `input[name="cd_mode"][value="${wantAudiobook ? 'audiobook' : 'music'}"]`);
+  if (modeEl) modeEl.checked = true;
+
+  applyCDRelease(scan, 0);
+  applyCDModeLabels();
+}
+
+function applyCDRelease(scan, index) {
+  const rel = (scan.musicbrainz || [])[index] || null;
+  $('#cd-creator').value = rel ? rel.artist : '';
+  $('#cd-title').value = rel ? rel.album : '';
+  $('#cd-year').value = rel && rel.year ? rel.year : '';
+  $('#cd-disc-number').value = rel && rel.disc_position ? rel.disc_position : 1;
+  $('#cd-total-discs').value = rel && rel.total_discs ? rel.total_discs : '';
+
+  // Titles come from the MB medium when present; else blank, keyed by track number.
+  const mbTitles = new Map();
+  if (rel) rel.tracks.forEach((t) => mbTitles.set(t.number, t.title || ''));
+
+  const body = $('#cd-track-body');
+  body.innerHTML = '';
+  const tpl = $('#cd-track-row-tpl');
+  scan.tracks.forEach((t) => {
+    const row = tpl.content.firstElementChild.cloneNode(true);
+    row.querySelector('.cd-num').textContent = t.number;
+    row.querySelector('.cd-dur').textContent = fmtDuration(t.duration_seconds);
+    const titleInput = row.querySelector('.cd-track-title');
+    titleInput.value = mbTitles.get(t.number) || '';
+    titleInput.dataset.number = t.number;
+    body.appendChild(row);
+  });
+
+  // Split-into-files is only offered when MusicBrainz actually gave us titles.
+  state.cdSplitAvailable = !!(rel && rel.tracks.some((t) => t.title));
+}
+
+// Split when: audiobook mode, MusicBrainz gave titles, and the box is checked.
+function cdWantsSplit() {
+  return cdMode() === 'audiobook' && !!state.cdSplitAvailable && $('#cd-split').checked;
+}
+
+function applyCDAudiobookSubmode() {
+  const wholeDisc = cdMode() === 'audiobook' && !cdWantsSplit();
+  // Show the track table for music, and for a split audiobook (titles -> filenames).
+  // A whole-disc audiobook hides the table and shows the intro/outro trim instead.
+  $('#cd-tracks').hidden = wholeDisc;
+  $('#cd-audiobook-trim').hidden = !wholeDisc;
+  $('#cd-audiobook-note').hidden = !wholeDisc;
+}
+
+function applyCDModeLabels() {
+  const audiobook = cdMode() === 'audiobook';
+  $('#cd-creator-label').textContent = audiobook ? 'Author' : 'Artist';
+  $('#cd-title-label').textContent = audiobook ? 'Book' : 'Album';
+  $('#cd-creator').placeholder = audiobook ? 'Author' : 'Artist';
+  $('#cd-title').placeholder = audiobook ? 'Book' : 'Album';
+  $('#cd-disc-num-field').hidden = !audiobook;
+  $('#cd-total-discs-field').hidden = !audiobook;
+  // The split option only appears for an audiobook MusicBrainz gave titles for.
+  $('#cd-split-field').hidden = !(audiobook && state.cdSplitAvailable);
+  applyCDAudiobookSubmode();
+  $('#btn-cd-rip').textContent =
+    !audiobook ? 'Rip Album' : (cdWantsSplit() ? 'Rip Tracks' : 'Rip Disc');
+}
+
+function collectCDRequest() {
+  // Track durations (from the scan) let the server show real-time rip progress.
+  const durByNum = new Map(
+    ((state.scan && state.scan.tracks) || []).map((t) => [t.number, t.duration_seconds]));
+  const tracks = $$('#cd-track-body .cd-track-row').map((row) => {
+    const number = parseInt(row.querySelector('.cd-track-title').dataset.number, 10);
+    return {
+      number,
+      title: row.querySelector('.cd-track-title').value.trim(),
+      include: row.querySelector('.cd-pick').checked,
+      duration_seconds: durByNum.has(number) ? durByNum.get(number) : null,
+    };
+  });
+  const split = cdWantsSplit();
+  // Whole-disc audiobook: the table is hidden, so derive include from the trim boxes.
+  if (cdMode() === 'audiobook' && !split) {
+    const skipFirst = $('#cd-skip-first').checked;
+    const skipLast = $('#cd-skip-last').checked;
+    tracks.forEach((t, i) => {
+      t.include = !((skipFirst && i === 0) || (skipLast && i === tracks.length - 1));
+    });
+  }
+  const total = $('#cd-total-discs').value;
+  return {
+    mode: cdMode(),
+    disc_id: (state.scan && state.scan.disc_id) || null,
+    creator: $('#cd-creator').value.trim(),
+    title: $('#cd-title').value.trim(),
+    year: $('#cd-year').value ? parseInt($('#cd-year').value, 10) : null,
+    disc_number: parseInt($('#cd-disc-number').value || '1', 10),
+    total_discs: total ? parseInt(total, 10) : null,
+    split_tracks: split,
+    tracks,
+  };
+}
+
+async function startCDRip() {
+  const statusEl = $('#cd-rip-status');
+  const req = collectCDRequest();
+  if (!req.creator || !req.title) {
+    statusEl.textContent = 'Enter artist/author and album/book first.';
+    statusEl.classList.add('error');
+    return;
+  }
+  if (!req.tracks.some((t) => t.include)) {
+    statusEl.textContent = 'Select at least one track.';
+    statusEl.classList.add('error');
+    return;
+  }
+  statusEl.classList.remove('error');
+  statusEl.textContent = 'Queuing…';
+  try {
+    const res = await fetch('/api/cd/rip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const { job_ids } = await res.json();
+    statusEl.textContent = `Queued (${job_ids.length}).`;
+    refreshJobs();
+    job_ids.forEach(streamJob);
+  } catch (err) {
+    statusEl.textContent = `Rip failed: ${err.message || err}`;
+    statusEl.classList.add('error');
+  }
+}
+
 // Show inline assignment widgets (episode input for TV, cd-N for Movie) only
 // on picked rows. Default episode number = the title's own index, so #3 → E[3];
 // user edits to the real episode number per row.
@@ -671,6 +843,13 @@ document.addEventListener('DOMContentLoaded', () => {
         applyManual();
       }
     });
+  });
+  $('#btn-cd-rip').addEventListener('click', startCDRip);
+  $$('input[name="cd_mode"]').forEach((el) =>
+    el.addEventListener('change', applyCDModeLabels));
+  $('#cd-split').addEventListener('change', applyCDModeLabels);
+  $('#cd-select-all').addEventListener('change', (e) => {
+    $$('#cd-track-body .cd-pick').forEach((c) => { c.checked = e.target.checked; });
   });
   scan();
   refreshJobs();

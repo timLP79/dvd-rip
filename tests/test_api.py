@@ -281,3 +281,69 @@ def test_scan_blocked_while_rip_running(client):
         assert res.status_code == 409
     finally:
         ripper._current_job_id = None
+
+
+def test_scan_routes_audio_cd_first(client):
+    from app.models import CDTrack, ScanResult
+    fake = ScanResult(dvd_label="AUDIO_CD", disc_format="cd",
+                      tracks=[CDTrack(number=1, duration_seconds=343)],
+                      disc_id="abc", musicbrainz=[])
+
+    async def fake_is_audio(device, **kw):
+        return True
+
+    async def fake_cd_scan(device, **kw):
+        return fake
+
+    with patch("app.cd.is_audio_cd", side_effect=fake_is_audio), \
+         patch("app.cd.scan", side_effect=fake_cd_scan):
+        res = client.get("/api/scan")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["disc_format"] == "cd"
+    assert body["tracks"][0]["number"] == 1
+    assert body["disc_id"] == "abc"
+
+
+def test_cd_rip_enqueues(client, monkeypatch):
+    from app.models import Job, JobStatus
+    captured = {}
+
+    def stub(*, request):
+        captured["req"] = request
+        return Job(id="cdjob1", title_index=request.disc_number,
+                   output_path="/x", status=JobStatus.QUEUED)
+
+    monkeypatch.setattr(client.app.state.ripper, "enqueue_cd", stub)
+    res = client.post("/api/cd/rip", json={
+        "mode": "audiobook", "creator": "Neil Gaiman", "title": "Fragile Things",
+        "disc_number": 5, "total_discs": 9,
+        "tracks": [{"number": 1, "title": "", "include": True}],
+    })
+    assert res.status_code == 200
+    assert res.json()["job_ids"] == ["cdjob1"]
+    assert captured["req"].creator == "Neil Gaiman"
+
+
+def test_cd_rip_rejects_no_included_tracks(client):
+    res = client.post("/api/cd/rip", json={
+        "mode": "music", "creator": "A", "title": "B",
+        "tracks": [{"number": 1, "include": False}],
+    })
+    assert res.status_code == 400
+
+
+def test_cd_rip_rejects_blank_metadata(client):
+    res = client.post("/api/cd/rip", json={
+        "mode": "music", "creator": "   ", "title": "B",
+        "tracks": [{"number": 1, "include": True}],
+    })
+    assert res.status_code == 400
+
+
+def test_index_includes_cd_panel_markup(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    assert 'id="cd-section"' in res.text
+    assert 'id="cd-track-body"' in res.text
+    assert 'id="btn-cd-rip"' in res.text
