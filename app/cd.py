@@ -159,6 +159,49 @@ async def _spawn(cmd: list[str], *, register_proc: Optional[Callable] = None) ->
     return proc.returncode or 0, out.decode(errors="replace")
 
 
+_CDDA_BYTES_PER_SEC = 44100 * 2 * 2   # 16-bit stereo @ 44.1 kHz
+_WAV_HEADER_BYTES = 44
+
+
+def _wav_frac(size_bytes: int, expected_bytes: int) -> float:
+    """Fraction of a track's WAV written so far, clamped to [0, 0.99]."""
+    if not expected_bytes:
+        return 0.0
+    return min(max((size_bytes - _WAV_HEADER_BYTES) / expected_bytes, 0.0), 0.99)
+
+
+async def _extract_track(cmd, *, wav, expected_bytes, on_frac, register_proc, spawn):
+    """Run cdparanoia, polling the growing WAV so progress moves within a track.
+
+    cdparanoia's own progress bar is fiddly to parse; the output WAV grows
+    predictably with the (known) track length, so file size gives smooth,
+    real-time progress with no dependency on cdparanoia's stderr format.
+    """
+    poll = None
+    if on_frac and expected_bytes:
+        async def _poll():
+            try:
+                while True:
+                    try:
+                        size = Path(wav).stat().st_size
+                    except OSError:
+                        size = 0
+                    on_frac(_wav_frac(size, expected_bytes))
+                    await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                pass
+        poll = asyncio.create_task(_poll())
+    try:
+        return await spawn(cmd, register_proc=register_proc)
+    finally:
+        if poll:
+            poll.cancel()
+            try:
+                await poll
+            except asyncio.CancelledError:
+                pass
+
+
 async def rip_disc(
     device: str,
     *,
@@ -191,6 +234,7 @@ async def rip_disc(
     total = len(included)
     # Per-track output: every music rip, and audiobook rips the user chose to split.
     per_track = mode == "music" or (mode == "audiobook" and split)
+    scale = 100 if per_track else 90   # ripping is the whole job (split) or the first 90% (join)
     scratch = Path(scratch_dir)
     scratch.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -199,16 +243,22 @@ async def rip_disc(
     try:
         for i, t in enumerate(included):
             if on_progress:
-                on_progress(round(i / total * (100 if per_track else 90), 1))
+                on_progress(round(i / total * scale, 1))
             wav = scratch / f"{t.number:02d}.wav"
             if on_stage:
                 label = (f"Ripping track {t.number}: {t.title}"
                          if per_track and t.title
                          else f"Ripping track {t.number} of {total}")
                 on_stage(label)
-            rc, out = await spawn(
+            # Poll the growing WAV against the track's known length for smooth,
+            # within-track progress (cdparanoia's own progress bar is unreliable).
+            on_frac = (
+                (lambda f, _i=i: on_progress(round((_i + f) / total * scale, 1)))
+                if on_progress else None)
+            rc, out = await _extract_track(
                 ["cdparanoia", "-d", device, str(t.number), str(wav)],
-                register_proc=register_proc)
+                wav=wav, expected_bytes=(t.duration_seconds or 0) * _CDDA_BYTES_PER_SEC,
+                on_frac=on_frac, register_proc=register_proc, spawn=spawn)
             if rc != 0:
                 raise RipError(f"cdparanoia failed on track {t.number} (rc={rc})\n{out}".strip())
             wavs.append(wav)

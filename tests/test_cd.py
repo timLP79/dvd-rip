@@ -173,6 +173,32 @@ async def test_rip_disc_audiobook_split_removes_written_on_failure(tmp_path):
     assert not list((tmp_path / "scratch").glob("*.wav"))
 
 
+def test_wav_frac_clamps():
+    from app.cd import _wav_frac
+    assert _wav_frac(44, 1000) == 0.0        # header only -> 0
+    assert _wav_frac(544, 1000) == 0.5       # (544-44)/1000
+    assert _wav_frac(100000, 1000) == 0.99   # clamped below 1.0 (never "done" until exit)
+    assert _wav_frac(500, 0) == 0.0          # unknown length -> 0 (poll disabled)
+
+
+@pytest.mark.asyncio
+async def test_extract_track_polls_wav_for_within_track_progress(tmp_path):
+    import asyncio
+    from app.cd import _extract_track
+    wav = tmp_path / "01.wav"
+    fracs = []
+
+    async def spawn(cmd, *, register_proc=None):
+        wav.write_bytes(b"\0" * (44 + 500))   # ~50% of the 1000 expected data bytes
+        await asyncio.sleep(0.01)             # yield so the poller ticks once
+        return 0, ""
+
+    rc, _ = await _extract_track(["cdparanoia"], wav=wav, expected_bytes=1000,
+                                 on_frac=fracs.append, register_proc=None, spawn=spawn)
+    assert rc == 0
+    assert 0.5 in fracs        # a within-track fraction was reported before completion
+
+
 @pytest.mark.asyncio
 async def test_rip_disc_music_writes_one_file_per_track(tmp_path):
     cmds = []

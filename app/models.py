@@ -121,6 +121,7 @@ class CDTrackSelection(BaseModel):
     number: int
     title: str = ""
     include: bool = True
+    duration_seconds: Optional[int] = None   # enables real-time (bytes-based) rip progress
 
 
 class CDRipRequest(BaseModel):

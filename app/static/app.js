@@ -519,11 +519,18 @@ function applyCDModeLabels() {
 }
 
 function collectCDRequest() {
-  const tracks = $$('#cd-track-body .cd-track-row').map((row) => ({
-    number: parseInt(row.querySelector('.cd-track-title').dataset.number, 10),
-    title: row.querySelector('.cd-track-title').value.trim(),
-    include: row.querySelector('.cd-pick').checked,
-  }));
+  // Track durations (from the scan) let the server show real-time rip progress.
+  const durByNum = new Map(
+    ((state.scan && state.scan.tracks) || []).map((t) => [t.number, t.duration_seconds]));
+  const tracks = $$('#cd-track-body .cd-track-row').map((row) => {
+    const number = parseInt(row.querySelector('.cd-track-title').dataset.number, 10);
+    return {
+      number,
+      title: row.querySelector('.cd-track-title').value.trim(),
+      include: row.querySelector('.cd-pick').checked,
+      duration_seconds: durByNum.has(number) ? durByNum.get(number) : null,
+    };
+  });
   const split = cdWantsSplit();
   // Whole-disc audiobook: the table is hidden, so derive include from the trim boxes.
   if (cdMode() === 'audiobook' && !split) {
