@@ -347,3 +347,12 @@ def test_index_includes_cd_panel_markup(client):
     assert 'id="cd-section"' in res.text
     assert 'id="cd-track-body"' in res.text
     assert 'id="btn-cd-rip"' in res.text
+
+
+def test_library_page_has_cd_filters(client):
+    res = client.get("/library")
+    assert res.status_code == 200
+    # Type filter gains Music/Audiobook; format filter gains CD.
+    assert '<option value="music">' in res.text
+    assert '<option value="audiobook">' in res.text
+    assert '<option value="cd">' in res.text

@@ -30,6 +30,11 @@ function label(r) {
     const e = String(r.episode ?? 0).padStart(2, '0');
     return `${r.title} S${s}E${e}`;
   }
+  if (r.content_type === 'music' || r.content_type === 'audiobook') {
+    // r.artist = Artist/Author, r.title = Album/Book.
+    const base = r.artist ? `${r.artist} — ${r.title}` : r.title;
+    return r.year ? `${base} (${r.year})` : base;
+  }
   return r.year ? `${r.title} (${r.year})` : r.title;
 }
 
