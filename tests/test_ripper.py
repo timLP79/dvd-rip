@@ -330,3 +330,28 @@ def test_run_cd_job_failure_marks_failed_and_cleans(tmp_path, monkeypatch):
     asyncio.run(r._run_job(job.id))
     assert r.get(job.id).status == JobStatus.FAILED
     assert "scratched disc" in (r.get(job.id).error or "")
+
+
+def test_cd_cancel_during_rip_marks_cancelled(tmp_path, monkeypatch):
+    import asyncio
+    from app import cd
+    from app.library import Library
+    from app.models import CDRipRequest, CDTrackSelection, JobStatus
+    from app.ripper import Ripper
+
+    lib = Library(str(tmp_path / "lib.db")); lib.init_db()
+    r = Ripper(device="/dev/sr0", output_root=tmp_path, library=lib,
+               scratch_dir=str(tmp_path / "scratch"))
+
+    async def fake_rip_disc(device, **kw):
+        # simulate cancel(): mark intent + raise as a terminated cdparanoia would
+        r._cancelling.add(job_id_holder["id"])
+        raise cd.RipError("cdparanoia exited with code -15")
+
+    monkeypatch.setattr(cd, "rip_disc", fake_rip_disc)
+    job = r.enqueue_cd(request=CDRipRequest(
+        mode="music", creator="Art", title="Alb",
+        tracks=[CDTrackSelection(number=1)]))
+    job_id_holder = {"id": job.id}
+    asyncio.run(r._run_job(job.id))
+    assert r.get(job.id).status == JobStatus.CANCELLED
