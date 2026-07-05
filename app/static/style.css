@@ -877,7 +877,17 @@ button.secondary:hover:not(:disabled) {
 .lib-pager button[disabled] { opacity: 0.45; cursor: default; }
 
 .cd-release-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-#cd-tracks .cd-track-title { width: 100%; }
+#cd-tracks .cd-track-title {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  color: var(--text);
+  padding: 6px 9px;
+  border-radius: var(--radius);
+}
+#cd-tracks .cd-track-title:focus { outline: none; border-color: var(--accent); }
 #cd-tracks .cd-num, #cd-tracks .cd-dur { white-space: nowrap; }
 #cd-audiobook-note { margin: 8px 0 0; font-size: 0.9em; }
 .cd-trim { display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap; }
