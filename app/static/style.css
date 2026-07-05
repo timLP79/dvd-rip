@@ -891,3 +891,4 @@ button.secondary:hover:not(:disabled) {
 #cd-tracks .cd-num, #cd-tracks .cd-dur { white-space: nowrap; }
 #cd-audiobook-note { margin: 8px 0 0; font-size: 0.9em; }
 .cd-trim { display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap; }
+.cd-split { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 13px; color: var(--text-muted); }

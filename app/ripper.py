@@ -387,6 +387,7 @@ class Ripper:
                 creator=request.creator, title=request.title, year=request.year,
                 disc_number=request.disc_number, total_discs=request.total_discs,
                 tracks=request.tracks, scratch_dir=self.scratch_dir,
+                split=request.split_tracks,
                 on_progress=lambda p: self._update(job_id, percent=p),
                 on_stage=lambda s: self._update(job_id, phase=s),
                 register_proc=lambda pr: setattr(self, "_current_process", pr),

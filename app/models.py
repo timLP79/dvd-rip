@@ -131,6 +131,7 @@ class CDRipRequest(BaseModel):
     year: Optional[int] = None
     disc_number: int = 1
     total_discs: Optional[int] = None
+    split_tracks: bool = False        # audiobook: split into per-track MP3s (MusicBrainz titles)
     tracks: list[CDTrackSelection]
 
 

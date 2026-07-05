@@ -62,7 +62,7 @@ async def test_scan_survives_musicbrainz_failure():
 import wave
 from pathlib import Path
 
-from app.cd import flac_args, lame_args, rip_disc
+from app.cd import flac_args, lame_args, lame_track_args, rip_disc
 from app.models import CDTrackSelection
 
 
@@ -117,6 +117,37 @@ def _spawn_factory(recorder):
             Path(_out_path(cmd)).write_bytes(b"encoded")
         return 0, ""
     return fake_spawn
+
+
+def test_lame_track_args_carry_track_tags(tmp_path):
+    args = lame_track_args(tmp_path / "in.wav", tmp_path / "out.mp3",
+                           artist="Neil Gaiman", title="The Mapmaker",
+                           album="Fragile Things", track_number=2, disc_number=1,
+                           total_discs=9, year=2006)
+    assert args[0] == "lame"
+    assert args[args.index("--tt") + 1] == "The Mapmaker"     # per-track TITLE
+    assert args[args.index("--tl") + 1] == "Fragile Things"   # ALBUM = book
+    assert args[args.index("--tn") + 1] == "2"                # track number
+    assert args[args.index("--tv") + 1] == "TPOS=1/9"         # disc position
+    assert args[-2:] == [str(tmp_path / "in.wav"), str(tmp_path / "out.mp3")]
+
+
+@pytest.mark.asyncio
+async def test_rip_disc_audiobook_split_one_file_per_track(tmp_path):
+    cmds = []
+    tracks = [CDTrackSelection(number=1, title="The Mapmaker"),
+              CDTrackSelection(number=2, title="A Study in Emerald")]
+    written = await rip_disc(
+        "/dev/sr0", mode="audiobook", output_root=tmp_path, creator="Neil Gaiman",
+        title="Fragile Things", year=2006, disc_number=1, total_discs=9,
+        tracks=tracks, scratch_dir=str(tmp_path / "scratch"), split=True,
+        spawn=_spawn_factory(cmds))
+    assert len(written) == 2
+    assert (tmp_path / "Audiobooks" / "Neil Gaiman" / "Fragile Things"
+            / "1-01 - The Mapmaker.mp3").exists()
+    # per-track lame, NOT a whole-disc join
+    assert [c[0] for c in cmds] == ["cdparanoia", "lame", "cdparanoia", "lame"]
+    assert not list((tmp_path / "scratch").glob("*.wav"))
 
 
 @pytest.mark.asyncio

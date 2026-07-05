@@ -153,3 +153,20 @@ def audiobook_path(
     multi = (total_discs is not None and total_discs > 1) or disc_number > 1
     name = f"{book_c}, Disc {disc_number:02d}" if multi else book_c
     return folder / f"{name}.{ext}"
+
+
+def audiobook_track_path(
+    output_root: Path,
+    *,
+    author: str,
+    book: str,
+    disc_number: int,
+    total_discs: Optional[int],
+    track_number: int,
+    track_title: str,
+    ext: str = "mp3",
+) -> Path:
+    """One MP3 per track (MusicBrainz split): <root>/Audiobooks/<Author>/<Book>/PREFIX - <Title>.mp3"""
+    folder = output_root / "Audiobooks" / sanitize(author) / sanitize(book)
+    prefix = _disc_prefix(disc_number, total_discs, track_number)
+    return folder / f"{prefix} - {clean_track_title(track_title, track_number)}.{ext}"

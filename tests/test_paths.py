@@ -116,6 +116,22 @@ def test_audiobook_path_single_disc(tmp_path):
     assert p.name == "Novella.mp3"
 
 
+def test_audiobook_track_path_split(tmp_path):
+    from app.paths import audiobook_track_path
+    p = audiobook_track_path(tmp_path, author="Neil Gaiman", book="Fragile Things",
+                             disc_number=1, total_discs=9, track_number=2,
+                             track_title="The Mapmaker")
+    assert p == (tmp_path / "Audiobooks" / "Neil Gaiman" / "Fragile Things"
+                 / "1-02 - The Mapmaker.mp3")
+
+
+def test_audiobook_track_path_untitled_falls_back(tmp_path):
+    from app.paths import audiobook_track_path
+    p = audiobook_track_path(tmp_path, author="A", book="B", disc_number=1,
+                             total_discs=1, track_number=3, track_title="")
+    assert p.name == "03 - Track 03.mp3"
+
+
 def test_sanitize_normalizes_unicode_punct():
     from app.paths import sanitize
     assert sanitize("It’s a “Test”…") == "It's a Test"   # trailing dots stripped (SMB-safe)

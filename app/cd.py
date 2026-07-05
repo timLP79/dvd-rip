@@ -17,7 +17,13 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from .models import CDTrack, CDTrackSelection, MBRelease, ScanResult
-from .paths import clean_track_title, audiobook_path, music_path, unique_path
+from .paths import (
+    audiobook_path,
+    audiobook_track_path,
+    clean_track_title,
+    music_path,
+    unique_path,
+)
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +118,23 @@ def lame_args(wav_path, out_path, *, artist, title, album, disc_number,
     return args
 
 
+def lame_track_args(wav_path, out_path, *, artist, title, album, track_number,
+                    disc_number, total_discs, year=None) -> list[str]:
+    """Per-track MP3 tags for a split audiobook (TITLE = story/track title)."""
+    args = [
+        "lame", "-V", _LAME_VBR_QUALITY, "--vbr-new", "--quiet",
+        "--ta", artist, "--tt", title, "--tl", album, "--tn", str(track_number),
+    ]
+    if total_discs and total_discs > 1:
+        args += ["--tv", f"TPOS={disc_number}/{total_discs}"]
+    elif disc_number > 1:
+        args += ["--tv", f"TPOS={disc_number}"]
+    if year:
+        args += ["--ty", str(year)]
+    args += [str(wav_path), str(out_path)]
+    return args
+
+
 def _concat_wavs(wav_paths, out_path) -> Path:
     """Join equal-format (CDDA) WAVs into one. All CD audio is 44100/16/stereo."""
     import wave
@@ -147,19 +170,26 @@ async def rip_disc(
     total_discs: Optional[int],
     tracks: list[CDTrackSelection],
     scratch_dir: str,
+    split: bool = False,
     on_progress: Optional[Callable[[float], None]] = None,
     on_stage: Optional[Callable[[str], None]] = None,
     register_proc: Optional[Callable] = None,
     spawn: Callable[..., Awaitable[tuple[int, str]]] = _spawn,
     join_wavs: Callable = _concat_wavs,
 ) -> list[Path]:
-    """Rip the included tracks. Music: one FLAC/track. Audiobook: one joined MP3.
+    """Rip the included tracks.
+
+    - Music: one FLAC per track.
+    - Audiobook, split=True: one MP3 per track, named by its MusicBrainz title.
+    - Audiobook, split=False: all tracks joined into ONE MP3 for the disc.
 
     Returns the files written. On any failure removes everything this call wrote
     (no-partial-garbage rule) and re-raises RipError. Scratch WAVs are always swept.
     """
     included = [t for t in tracks if t.include]
     total = len(included)
+    # Per-track output: every music rip, and audiobook rips the user chose to split.
+    per_track = mode == "music" or (mode == "audiobook" and split)
     scratch = Path(scratch_dir)
     scratch.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -168,11 +198,11 @@ async def rip_disc(
     try:
         for i, t in enumerate(included):
             if on_progress:
-                on_progress(round(i / total * (100 if mode == "music" else 90), 1))
+                on_progress(round(i / total * (100 if per_track else 90), 1))
             wav = scratch / f"{t.number:02d}.wav"
             if on_stage:
                 label = (f"Ripping track {t.number}: {t.title}"
-                         if mode == "music" and t.title
+                         if per_track and t.title
                          else f"Ripping track {t.number} of {total}")
                 on_stage(label)
             rc, out = await spawn(
@@ -182,23 +212,37 @@ async def rip_disc(
                 raise RipError(f"cdparanoia failed on track {t.number} (rc={rc})\n{out}".strip())
             wavs.append(wav)
 
-            if mode == "music":
-                out_path = unique_path(music_path(
-                    output_root, artist=creator, album=title, disc_number=disc_number,
-                    total_discs=total_discs, track_number=t.number, track_title=t.title))
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                rc, out = await spawn(flac_args(
-                    wav, out_path, artist=creator, album=title,
-                    title=clean_track_title(t.title, t.number),
-                    track_number=t.number, track_total=total, date=year,
-                    disc_number=(disc_number if (total_discs or disc_number > 1) else None)),
-                    register_proc=register_proc)
-                if rc != 0:
-                    raise RipError(f"flac failed on track {t.number} (rc={rc})\n{out}".strip())
+            if per_track:
+                if mode == "music":
+                    out_path = unique_path(music_path(
+                        output_root, artist=creator, album=title, disc_number=disc_number,
+                        total_discs=total_discs, track_number=t.number, track_title=t.title))
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    rc, out = await spawn(flac_args(
+                        wav, out_path, artist=creator, album=title,
+                        title=clean_track_title(t.title, t.number),
+                        track_number=t.number, track_total=total, date=year,
+                        disc_number=(disc_number if (total_discs or disc_number > 1) else None)),
+                        register_proc=register_proc)
+                    if rc != 0:
+                        raise RipError(f"flac failed on track {t.number} (rc={rc})\n{out}".strip())
+                else:  # audiobook split -> one titled MP3 per track
+                    out_path = unique_path(audiobook_track_path(
+                        output_root, author=creator, book=title, disc_number=disc_number,
+                        total_discs=total_discs, track_number=t.number, track_title=t.title))
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    rc, out = await spawn(lame_track_args(
+                        wav, out_path, artist=creator,
+                        title=clean_track_title(t.title, t.number), album=title,
+                        track_number=t.number, disc_number=disc_number,
+                        total_discs=total_discs, year=year),
+                        register_proc=register_proc)
+                    if rc != 0:
+                        raise RipError(f"lame failed on track {t.number} (rc={rc})\n{out}".strip())
                 written.append(out_path)
                 wav.unlink(missing_ok=True)
 
-        if mode == "audiobook":
+        if mode == "audiobook" and not split:
             if on_stage:
                 on_stage("Encoding disc")
             out_path = unique_path(audiobook_path(

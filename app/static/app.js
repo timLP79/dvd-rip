@@ -483,6 +483,23 @@ function applyCDRelease(scan, index) {
     titleInput.dataset.number = t.number;
     body.appendChild(row);
   });
+
+  // Split-into-files is only offered when MusicBrainz actually gave us titles.
+  state.cdSplitAvailable = !!(rel && rel.tracks.some((t) => t.title));
+}
+
+// Split when: audiobook mode, MusicBrainz gave titles, and the box is checked.
+function cdWantsSplit() {
+  return cdMode() === 'audiobook' && !!state.cdSplitAvailable && $('#cd-split').checked;
+}
+
+function applyCDAudiobookSubmode() {
+  const wholeDisc = cdMode() === 'audiobook' && !cdWantsSplit();
+  // Show the track table for music, and for a split audiobook (titles -> filenames).
+  // A whole-disc audiobook hides the table and shows the intro/outro trim instead.
+  $('#cd-tracks').hidden = wholeDisc;
+  $('#cd-audiobook-trim').hidden = !wholeDisc;
+  $('#cd-audiobook-note').hidden = !wholeDisc;
 }
 
 function applyCDModeLabels() {
@@ -493,10 +510,11 @@ function applyCDModeLabels() {
   $('#cd-title').placeholder = audiobook ? 'Book' : 'Album';
   $('#cd-disc-num-field').hidden = !audiobook;
   $('#cd-total-discs-field').hidden = !audiobook;
-  $('#cd-audiobook-note').hidden = !audiobook;
-  $('#cd-tracks').hidden = audiobook;          // never render the (up to 99-row) table for audiobook
-  $('#cd-audiobook-trim').hidden = !audiobook;
-  $('#btn-cd-rip').textContent = audiobook ? 'Rip Disc' : 'Rip Album';
+  // The split option only appears for an audiobook MusicBrainz gave titles for.
+  $('#cd-split-field').hidden = !(audiobook && state.cdSplitAvailable);
+  applyCDAudiobookSubmode();
+  $('#btn-cd-rip').textContent =
+    !audiobook ? 'Rip Album' : (cdWantsSplit() ? 'Rip Tracks' : 'Rip Disc');
 }
 
 function collectCDRequest() {
@@ -505,7 +523,9 @@ function collectCDRequest() {
     title: row.querySelector('.cd-track-title').value.trim(),
     include: row.querySelector('.cd-pick').checked,
   }));
-  if (cdMode() === 'audiobook') {
+  const split = cdWantsSplit();
+  // Whole-disc audiobook: the table is hidden, so derive include from the trim boxes.
+  if (cdMode() === 'audiobook' && !split) {
     const skipFirst = $('#cd-skip-first').checked;
     const skipLast = $('#cd-skip-last').checked;
     tracks.forEach((t, i) => {
@@ -521,6 +541,7 @@ function collectCDRequest() {
     year: $('#cd-year').value ? parseInt($('#cd-year').value, 10) : null,
     disc_number: parseInt($('#cd-disc-number').value || '1', 10),
     total_discs: total ? parseInt(total, 10) : null,
+    split_tracks: split,
     tracks,
   };
 }
@@ -818,6 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#btn-cd-rip').addEventListener('click', startCDRip);
   $$('input[name="cd_mode"]').forEach((el) =>
     el.addEventListener('change', applyCDModeLabels));
+  $('#cd-split').addEventListener('change', applyCDModeLabels);
   $('#cd-select-all').addEventListener('change', (e) => {
     $$('#cd-track-body .cd-pick').forEach((c) => { c.checked = e.target.checked; });
   });

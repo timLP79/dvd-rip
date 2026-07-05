@@ -31,6 +31,7 @@ def test_cd_rip_request_defaults():
     assert req.tracks[0].include is True
     assert req.tracks[0].title == ""
     assert req.year is None
+    assert req.split_tracks is False
 
 
 def test_mbrelease_and_riprecord_artist():
