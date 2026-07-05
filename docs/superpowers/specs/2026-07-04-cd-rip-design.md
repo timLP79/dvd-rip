@@ -1,8 +1,15 @@
 # CD Ripping (Music + Audiobooks) — Design
 
 - **Date:** 2026-07-04 (revised same day after probing two real audiobook discs — see "Field evaluation")
-- **Status:** Approved design, pending implementation plan
+- **Status:** ✅ **SHIPPED** — implemented per `docs/superpowers/plans/2026-07-04-cd-rip-implementation.md`, merged to `main` (PR #2), hardware-verified with a real rip. Library-page support merged separately (PR #3).
 - **Related:** extends the existing DVD/Blu-ray rip pipeline
+
+> **Shipped beyond this original v1 design** (added during live testing; this doc predates them):
+> - **Audiobook auto-detect** — an exact MusicBrainz hit tagged `Audiobook`/`Spokenword` (release-group secondary type) now defaults the UI to Audiobook mode. (Design decision 5 said this wasn't possible; it referred to MB *misses* — a tagged *hit* is a reliable signal.)
+> - **Split-by-MusicBrainz** — the "deferred" Design decision 9 is now implemented: a gated "Split into tracks" toggle (shown only when the exact hit carries per-track titles) emits one titled MP3 per track instead of the whole-disc join.
+> - **Real-time within-track progress** — CD progress now polls the growing WAV against the track's known length (bytes-based), so the bar moves like HandBrake/MakeMKV rather than jumping per finished track. (Supersedes Design decision 4's per-track-only stance.)
+> - **Library page** — shows `Artist — Album (Year)` for music/audiobook rows and adds Music/Audiobook/CD filters (PR #3).
+> - **Known gap (accepted):** whole-disc audiobook *join* mode holds the bar at 90% during the final single `lame` encode of the joined WAV (no encode-progress). Split mode and music don't have this. Tracked separately.
 
 ## Summary
 

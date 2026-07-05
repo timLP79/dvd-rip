@@ -93,21 +93,23 @@ Module map (all in `app/`):
 
 | File | Responsibility |
 |---|---|
-| `main.py` | FastAPI routes (`/api/scan`, `/api/search`, `/api/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
-| `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult` |
+| `main.py` | FastAPI routes (`/api/scan` routes CD→DVD→Blu-ray, `/api/search`, `/api/rip`, `/api/cd/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
+| `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult`; `is_dvd_video()` fast lsdvd probe so DVDs skip makemkvcon |
 | `bluray.py` | MakeMKV front-end — detect BD, scan titles, decrypt a title to a temp MKV (the only module that touches `makemkvcon`) |
+| `cd.py` | Audio-CD ripping (the only module touching `libdiscid`/`cdparanoia`/`flac`/`lame`) — detection + TOC scan, and the per-track rip loop (`cdparanoia`→WAV, then `flac`/`lame`). Music → per-track FLAC; audiobook → one joined MP3/disc, or split-by-MusicBrainz into per-title MP3s. Within-track progress via WAV-size polling |
 | `presets.py` | HandBrake argv builders for Quality (x264 CPU) and Speed (NVENC H.264) modes |
-| `paths.py` | Plex-compliant output paths (`Movies/Title (Year)/…`, `TV Shows/Show/Season NN/Show SNNeNN.mp4`) |
+| `paths.py` | Plex-compliant output paths (`Movies/…`, `TV Shows/…`, `Music/Artist/Album/…`, `Audiobooks/Author/Book/…`) |
 | `tmdb.py` | Async TMDB client (search movie/tv, season-episode list) — optional, gated on `TMDB_API_KEY` |
-| `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out; records each terminal job to the library |
-| `library.py` | SQLite rip ledger — `record_rip`/`list_rips`/`find_existing` + `/output` backfill (the only module that touches SQL) |
-| `models.py` | Pydantic models shared across API and worker |
-| `static/`, `templates/` | UI (no build step — Jinja2 + vanilla JS + IBM Plex Sans/Mono fonts) |
+| `musicbrainz.py` | Async MusicBrainz client — **exact disc-ID lookup only** (no fuzzy TOC); returns candidate releases + `is_audiobook` (release-group secondary type). No API key; parallels `tmdb.py` |
+| `ripper.py` | Asyncio job queue + single-worker subprocess control + SSE progress fan-out; dispatches DVD / Blu-ray / CD jobs; records each terminal job to the library |
+| `library.py` | SQLite rip ledger — `record_rip`/`list_rips`/`find_existing` + `/output` backfill; additive migrations (`artist` column for music/audiobook). The only module that touches SQL |
+| `models.py` | Pydantic models shared across API and worker (incl. `CDTrack`/`MBRelease`/`CDRipRequest`) |
+| `static/`, `templates/` | UI (no build step — Jinja2 + vanilla JS + IBM Plex Sans/Mono fonts); `index.html`/`app.js` include the CD panel, `library.html`/`library.js` the ledger view |
 
 Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`):
 
 - Base: `nvidia/cuda:12.6.0-base-ubuntu24.04` (NVENC support)
-- Apt: `handbrake-cli`, `libdvd-pkg` (builds `libdvdcss2` at install time), `libdvdread8t64`, `libdvdnav4`, `lsdvd`, `gosu`, `python3.12`
+- Apt: `handbrake-cli`, `libdvd-pkg` (builds `libdvdcss2` at install time), `libdvdread8t64`, `libdvdnav4`, `lsdvd`, `cdparanoia`, `flac`, `lame`, `libdiscid0` (audio-CD ripping), `gosu`, `python3.12`. Python deps add `discid` (libdiscid binding) — see `requirements.txt`.
 - Entrypoint creates an `app` user with the host-supplied PUID/PGID, joins the cdrom group, chowns `/output`, and `gosu`-drops to that user before launching uvicorn — so PID 1 inside the container runs as your host UID.
 - `docker-compose.yml` device-mounts `/dev/sr0` and adds `group_add: ${CDROM_GID:-24}` for drive read access.
 - A `./data:/data` volume holds `library.db` (the SQLite rip ledger), kept out of the `/output` media tree so Plex never scans it. Path via `LIBRARY_DB`.
@@ -121,5 +123,6 @@ Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`)
 - **Output cleanup** — non-zero exit from HandBrake means no `moov` atom → unplayable file. The ripper unlinks the partial unconditionally on cancel/fail.
 - **No build step on the frontend** — just `<link>`/`<script>` tags. `?v=<token>` query strings (per-container-start hex) bust the browser cache after rebuilds so stale JS never collides with new HTML.
 - **Plex naming** matches the user's existing library convention exactly: TV shows omit the year (`TV Shows/Deadwood/Season 01/Deadwood S01E01.mp4`), movies use `Movies/Title (Year)/Title (Year).mp4` with `- cd2` etc. for multi-part. Sanitization strips OS-illegal chars but keeps spaces and `!`.
-- **Tests** never depend on a real DVD drive — `tests/fixtures/scan_*.txt` are recorded `HandBrakeCLI --json --scan` outputs; `respx` mocks TMDB HTTP.
+- **CD ripping** — audio CDs are Red Book (no filesystem); a CD track is never a chapter. Audiobook = **one joined MP3 per disc** by default (a 96-track seek-index disc must never become 96 files), with an optional **split-by-MusicBrainz** mode (per-title MP3s) when the exact disc-ID hit carries titles. MusicBrainz is **exact disc-ID only** (fuzzy TOC returns false positives — bird-song CDs, jingle libraries). Full design + field evaluation: `docs/superpowers/specs/2026-07-04-cd-rip-design.md`.
+- **Tests** never depend on a real optical drive — DVD uses recorded `tests/fixtures/scan_*.txt`; CD injects fake disc readers + subprocess spawners (no `cdparanoia`/`libdiscid`/`flac`/`lame` needed); `respx` mocks TMDB **and** MusicBrainz HTTP.
 - **Secrets** (just `TMDB_API_KEY` today) live in `.env`, which is gitignored. `.env.example` is the template.
