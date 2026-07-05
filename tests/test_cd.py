@@ -151,6 +151,29 @@ async def test_rip_disc_audiobook_split_one_file_per_track(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_rip_disc_audiobook_split_removes_written_on_failure(tmp_path):
+    calls = {"n": 0}
+    async def flaky_spawn(cmd, *, register_proc=None):
+        if cmd[0] == "cdparanoia":
+            _fake_wav(Path(_out_path(cmd)))
+            return 0, ""
+        calls["n"] += 1
+        if calls["n"] == 2:                      # second track's lame encode fails
+            return 1, "lame: disk full"
+        Path(_out_path(cmd)).write_bytes(b"x")
+        return 0, ""
+    tracks = [CDTrackSelection(number=1, title="A"), CDTrackSelection(number=2, title="B")]
+    with pytest.raises(Exception):
+        await rip_disc("/dev/sr0", mode="audiobook", output_root=tmp_path,
+                       creator="Auth", title="Book", year=None, disc_number=1,
+                       total_discs=None, tracks=tracks, split=True,
+                       scratch_dir=str(tmp_path / "scratch"), spawn=flaky_spawn)
+    # No partial garbage: the first (successful) MP3 is rolled back; scratch swept.
+    assert not list((tmp_path / "Audiobooks").rglob("*.mp3"))
+    assert not list((tmp_path / "scratch").glob("*.wav"))
+
+
+@pytest.mark.asyncio
 async def test_rip_disc_music_writes_one_file_per_track(tmp_path):
     cmds = []
     tracks = [CDTrackSelection(number=1, title="Airbag"),

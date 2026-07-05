@@ -4,8 +4,9 @@ The only module that touches `libdiscid`/`cdparanoia`/`flac`/`lame`. Parallels
 bluray.py. The disc reader and subprocess spawner are injectable so no test
 requires a physical CD or these tools installed.
 
-Audiobook mode joins all included tracks into ONE MP3 per disc; music mode
-emits one FLAC per track (design decisions 8-9).
+Audiobook mode joins all included tracks into ONE MP3 per disc, or (when the
+user opts to split) emits one titled MP3 per track; music mode emits one FLAC
+per track (design decisions 8-9).
 """
 
 from __future__ import annotations

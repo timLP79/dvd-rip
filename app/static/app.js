@@ -8,6 +8,7 @@ const state = {
   tmdbEnabled: document.body.dataset.tmdbEnabled === 'true',
   tvEpisodeMap: new Map(),   // title_index -> episode_number (user override)
   tvEpisodeTitles: new Map(),// title_index -> episode_title (TMDB-fetched, optional)
+  cdSplitAvailable: false,   // did MusicBrainz give per-track titles for this CD?
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -444,7 +445,7 @@ function renderCDPanel(scan) {
       b.type = 'button';
       b.className = 'secondary';
       b.textContent = `${rel.artist} — ${rel.album}${rel.year ? ' (' + rel.year + ')' : ''}`;
-      b.addEventListener('click', () => applyCDRelease(scan, i));
+      b.addEventListener('click', () => { applyCDRelease(scan, i); applyCDModeLabels(); });
       picker.appendChild(b);
     });
   }
