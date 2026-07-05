@@ -200,6 +200,26 @@ async def test_extract_track_polls_wav_for_within_track_progress(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_extract_track_poll_error_never_masks_rip_result(tmp_path):
+    import asyncio
+    from app.cd import _extract_track
+    wav = tmp_path / "01.wav"
+
+    def boom(_frac):
+        raise RuntimeError("progress update failed")
+
+    async def spawn(cmd, *, register_proc=None):
+        wav.write_bytes(b"\0" * 544)
+        await asyncio.sleep(0.01)   # let the poller tick (and raise) once
+        return 0, ""
+
+    # A raising progress callback must NOT propagate out of the rip.
+    rc, _ = await _extract_track(["cdparanoia"], wav=wav, expected_bytes=1000,
+                                 on_frac=boom, register_proc=None, spawn=spawn)
+    assert rc == 0
+
+
+@pytest.mark.asyncio
 async def test_rip_disc_music_writes_one_file_per_track(tmp_path):
     cmds = []
     tracks = [CDTrackSelection(number=1, title="Airbag"),

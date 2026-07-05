@@ -186,7 +186,10 @@ async def _extract_track(cmd, *, wav, expected_bytes, on_frac, register_proc, sp
                         size = Path(wav).stat().st_size
                     except OSError:
                         size = 0
-                    on_frac(_wav_frac(size, expected_bytes))
+                    try:
+                        on_frac(_wav_frac(size, expected_bytes))
+                    except Exception:
+                        return   # progress is best-effort; never let it affect the rip
                     await asyncio.sleep(0.5)
             except asyncio.CancelledError:
                 pass
