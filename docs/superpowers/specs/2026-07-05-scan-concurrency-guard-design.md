@@ -1,7 +1,7 @@
 # Scan Concurrency Guard + Cancelable Scan — Design
 
 - **Date:** 2026-07-05
-- **Status:** 📐 Design approved — not yet implemented
+- **Status:** ✅ **SHIPPED** — implemented per `docs/superpowers/plans/2026-07-05-scan-concurrency-guard.md`, merged to `main` (PR #4). Built via subagent-driven TDD; `make test` 202 passing. Note: the rip/cd-rip scan-busy guard shipped as a `Depends(_require_scan_idle)` route dependency (not the inline check the plan text shows) — FastAPI validates the request body before the handler body, so the dependency is what resolves first and returns the 409.
 - **Bead:** `dvd-rip-opz` (feature). Follow-up: `dvd-rip-r6n` (wrap blocking `discid.read`).
 - **Related:** hardens the existing `/api/scan` path; reuses the `register_proc` cancellation pattern from `bluray.decrypt_title` and `cd._spawn`.
 
