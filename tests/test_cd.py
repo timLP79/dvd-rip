@@ -59,6 +59,54 @@ async def test_scan_survives_musicbrainz_failure():
     assert len(sr.tracks) == 8
 
 
+@pytest.mark.asyncio
+async def test_is_audio_cd_reads_off_the_event_loop_thread():
+    """The blocking libdiscid read must run in a worker thread, not on the loop."""
+    import threading
+    loop_thread = threading.get_ident()
+    seen = {}
+
+    def fake_read(device):
+        seen["thread"] = threading.get_ident()
+        return GAIMAN_D5
+
+    assert await cd.is_audio_cd("/dev/sr0", read_disc=fake_read) is True
+    assert seen["thread"] != loop_thread
+
+
+@pytest.mark.asyncio
+async def test_scan_reads_off_the_event_loop_thread():
+    """cd.scan's TOC read must also run in a worker thread, not on the loop."""
+    import threading
+    loop_thread = threading.get_ident()
+    seen = {}
+
+    def fake_read(device):
+        seen["thread"] = threading.get_ident()
+        return NOVEL_96
+
+    sr = await cd.scan("/dev/sr0", read_disc=fake_read, mb_client=None)
+    assert sr.disc_id == NOVEL_96.disc_id
+    assert seen["thread"] != loop_thread
+
+
+@pytest.mark.asyncio
+async def test_is_audio_cd_returns_false_when_toc_read_exceeds_timeout(monkeypatch):
+    """A stuck TOC read is bounded: is_audio_cd gives up (False) instead of hanging."""
+    import threading
+    monkeypatch.setattr(cd, "_TOC_READ_TIMEOUT", 0.05, raising=False)
+    release = threading.Event()
+
+    def hanging_read(device):
+        release.wait(2)          # simulate a stuck libdiscid read
+        return GAIMAN_D5
+
+    try:
+        assert await cd.is_audio_cd("/dev/sr0", read_disc=hanging_read) is False
+    finally:
+        release.set()            # let the leaked worker thread finish
+
+
 import wave
 from pathlib import Path
 

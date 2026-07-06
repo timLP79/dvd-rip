@@ -52,10 +52,21 @@ def _read_disc(device: str) -> CDDiscInfo:
     return CDDiscInfo(disc_id=disc.id, tracks=tracks)
 
 
+# A libdiscid TOC read is normally ~1-2s. Bound it so a stuck read on a bad disc
+# can't hang the scan forever — which, since is_audio_cd runs under the scan
+# coordinator, would otherwise leave the coordinator's busy flag set (a cancel
+# kills subprocesses, not this worker thread) and lock out all future scans.
+_TOC_READ_TIMEOUT = 30.0
+
+
 async def is_audio_cd(device: str, *, read_disc: Callable[[str], CDDiscInfo] = _read_disc) -> bool:
-    """True if `device` holds an audio CD (libdiscid.read succeeds)."""
+    """True if `device` holds an audio CD (libdiscid.read succeeds).
+
+    `read_disc` is a blocking libdiscid call; run it in a worker thread so a
+    slow/stuck TOC read never blocks the asyncio event loop.
+    """
     try:
-        read_disc(device)
+        await asyncio.wait_for(asyncio.to_thread(read_disc, device), timeout=_TOC_READ_TIMEOUT)
         return True
     except Exception:
         return False
@@ -71,7 +82,7 @@ async def scan(
 
     The TOC is always returned even if MusicBrainz is down/empty.
     """
-    info = read_disc(device)
+    info = await asyncio.to_thread(read_disc, device)
     releases: list[MBRelease] = []
     if mb_client is not None:
         try:
