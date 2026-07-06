@@ -43,10 +43,10 @@ def test_scan_endpoint_returns_titles(client):
         ],
     )
 
-    async def fake_scan(device):
+    async def fake_scan(device, register_proc=None):
         return fake
 
-    async def fake_is_dvd(device):
+    async def fake_is_dvd(device, register_proc=None):
         return True  # deterministic: take the DVD path without spawning lsdvd
 
     with patch("app.main.is_dvd_video", side_effect=fake_is_dvd), \
@@ -64,13 +64,13 @@ def test_scan_dvd_skips_makemkv(client):
     fake = ScanResult(dvd_label="DVD_DISC", titles=[])
     bluray_called = {"hit": False}
 
-    async def fake_is_dvd(device):
+    async def fake_is_dvd(device, register_proc=None):
         return True
 
-    async def fake_scan(device):
+    async def fake_scan(device, register_proc=None):
         return fake
 
-    async def fake_bluray(device):
+    async def fake_bluray(device, register_proc=None):
         bluray_called["hit"] = True
         return None
 
@@ -87,10 +87,10 @@ def test_scan_uses_bluray_when_not_dvd(client):
     """A non-DVD disc falls through to makemkvcon-based Blu-ray detection."""
     bd = ScanResult(dvd_label="BLURAY", titles=[], disc_format="bluray")
 
-    async def fake_is_dvd(device):
+    async def fake_is_dvd(device, register_proc=None):
         return False
 
-    async def fake_bluray(device):
+    async def fake_bluray(device, register_proc=None):
         return bd
 
     with patch("app.main.is_dvd_video", side_effect=fake_is_dvd), \
@@ -259,7 +259,7 @@ def test_scan_falls_back_to_dvd(client):
         return None
     from app.models import ScanResult
 
-    async def fake_dvd(device):
+    async def fake_dvd(device, register_proc=None):
         return ScanResult(dvd_label="A_DVD", titles=[])
 
     with patch("app.main.bluray_detect_and_scan", side_effect=fake_detect), \
@@ -356,3 +356,67 @@ def test_library_page_has_cd_filters(client):
     assert '<option value="music">' in res.text
     assert '<option value="audiobook">' in res.text
     assert '<option value="cd">' in res.text
+
+
+def test_second_scan_returns_409_while_scanning(client):
+    from app import main as main_module
+    coord = main_module.app.state.scan_coordinator
+    coord._busy = True  # simulate a scan already in progress
+    try:
+        res = client.get("/api/scan")
+        assert res.status_code == 409
+        assert "already in progress" in res.json()["detail"].lower()
+    finally:
+        coord._busy = False
+
+
+def test_scan_cancel_kills_live_proc(client):
+    from app import main as main_module
+    coord = main_module.app.state.scan_coordinator
+
+    class FakeProc:
+        returncode = None
+        def __init__(self):
+            self.killed = False
+        def kill(self):
+            self.killed = True
+
+    proc = FakeProc()
+    coord._busy = True
+    coord._proc = proc
+    try:
+        res = client.post("/api/scan/cancel")
+        assert res.status_code == 200
+        assert res.json()["cancelled"] is True
+        assert proc.killed is True
+    finally:
+        coord._busy = False
+        coord._proc = None
+
+
+def test_scan_cancel_when_idle_returns_false(client):
+    res = client.post("/api/scan/cancel")
+    assert res.status_code == 200
+    assert res.json()["cancelled"] is False
+
+
+def test_rip_blocked_while_scanning(client):
+    from app import main as main_module
+    coord = main_module.app.state.scan_coordinator
+    coord._busy = True
+    try:
+        res = client.post("/api/rip", json={"titles": []})
+        assert res.status_code == 409
+    finally:
+        coord._busy = False
+
+
+def test_cd_rip_blocked_while_scanning(client):
+    from app import main as main_module
+    coord = main_module.app.state.scan_coordinator
+    coord._busy = True
+    try:
+        res = client.post("/api/cd/rip", json={"tracks": []})
+        assert res.status_code == 409
+    finally:
+        coord._busy = False

@@ -2,6 +2,7 @@
 
 const state = {
   scan: null,
+  scanCancelled: false,
   jobStreams: new Map(),     // job_id -> EventSource
   contentType: 'movie',      // 'movie' | 'tv'
   selectedMeta: null,        // {type:'movie', title, year, tmdb_id?} or {type:'tv', show, season, tmdb_id?}
@@ -92,22 +93,35 @@ async function scan() {
   const status = $('#scan-status');
   const discSec = $('#disc-meta-section');
   const titlesSec = $('#titles-section');
+  const rescanBtn = $('#btn-rescan');
+  const cancelBtn = $('#btn-scan-cancel');
+  state.scanCancelled = false;
   status.textContent = 'Scanning…';
   status.classList.remove('error');
   status.hidden = false;
   discSec.hidden = true;
   titlesSec.hidden = true;
+  rescanBtn.disabled = true;
+  cancelBtn.hidden = false;
+  cancelBtn.disabled = false;
   try {
     const res = await fetch('/api/scan');
     if (res.status === 409) {
-      // A rip is using the drive — don't rescan it. Progress shows in the Jobs section.
-      status.textContent = 'Rip in progress — disc scan paused. Watch progress in Jobs below.';
+      const detail = (await res.json().catch(() => ({}))).detail || '';
+      status.textContent = detail.toLowerCase().includes('scan already')
+        ? 'A scan is already in progress.'
+        : 'Rip in progress — disc scan paused. Watch progress in Jobs below.';
       status.classList.remove('error');
       status.hidden = false;
       return;
     }
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
+    if (state.scanCancelled) {
+      status.textContent = 'Scan canceled. Insert a disc and click Rescan.';
+      status.classList.remove('error');
+      return;
+    }
     state.scan = data;
     state.selectedMeta = null;
     state.tvEpisodeMap.clear();
@@ -128,8 +142,27 @@ async function scan() {
     discSec.hidden = false;
     titlesSec.hidden = false;
   } catch (err) {
-    status.textContent = `Scan failed: ${err.message || err}`;
-    status.classList.add('error');
+    if (state.scanCancelled) {
+      status.textContent = 'Scan canceled. Insert a disc and click Rescan.';
+      status.classList.remove('error');
+    } else {
+      status.textContent = `Scan failed: ${err.message || err}`;
+      status.classList.add('error');
+    }
+  } finally {
+    rescanBtn.disabled = false;
+    cancelBtn.hidden = true;
+  }
+}
+
+async function cancelScan() {
+  state.scanCancelled = true;
+  const cancelBtn = $('#btn-scan-cancel');
+  cancelBtn.disabled = true;
+  try {
+    await fetch('/api/scan/cancel', { method: 'POST' });
+  } catch (_) {
+    // The in-flight scan will settle and render the canceled state regardless.
   }
 }
 
@@ -798,6 +831,7 @@ function streamJob(jobId) {
 
 document.addEventListener('DOMContentLoaded', () => {
   $('#btn-rescan').addEventListener('click', scan);
+  $('#btn-scan-cancel').addEventListener('click', cancelScan);
   $('#btn-rip').addEventListener('click', startRip);
   $('#btn-search').addEventListener('click', runSearch);
   $('#btn-manual').addEventListener('click', showManualEntry);

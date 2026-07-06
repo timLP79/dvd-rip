@@ -171,10 +171,12 @@ def parse_makemkv_info(robot_output: str) -> list[Title]:
 _INFO_TIMEOUT = 600.0
 
 
-async def _spawn(cmd: list[str], timeout: float = _INFO_TIMEOUT) -> tuple[int, str, str]:
+async def _spawn(cmd: list[str], timeout: float = _INFO_TIMEOUT, *, register_proc=None) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
+    if register_proc is not None:
+        register_proc(proc)
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
@@ -184,11 +186,12 @@ async def _spawn(cmd: list[str], timeout: float = _INFO_TIMEOUT) -> tuple[int, s
     return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
 
-async def detect_and_scan(device: str, *, _run: Callable = _spawn) -> Optional[ScanResult]:
+async def detect_and_scan(device: str, *, _run: Callable = _spawn, register_proc=None) -> Optional[ScanResult]:
     """Run `makemkvcon info`; return a Blu-ray ScanResult, or None to fall back to DVD."""
     cmd = ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"]
+    kwargs = {} if register_proc is None else {"register_proc": register_proc}
     try:
-        rc, out, err = await _run(cmd, timeout=_INFO_TIMEOUT)
+        rc, out, err = await _run(cmd, timeout=_INFO_TIMEOUT, **kwargs)
     except FileNotFoundError:
         log.error("makemkvcon not found on PATH")
         return None

@@ -124,3 +124,40 @@ def test_parse_normal_disc_sets_aspect():
     # scan_normal has a PAR 32:27 title (widescreen) and PAR 1:1 titles (fullscreen)
     assert "widescreen" in labels
     assert "fullscreen" in labels
+
+
+def test_spawn_calls_register_proc_with_process():
+    from app.dvd import _spawn
+    captured = {}
+
+    def reg(proc):
+        captured["proc"] = proc
+
+    rc, out, err = asyncio.run(_spawn(["/bin/echo", "hi"], register_proc=reg))
+    assert rc == 0
+    assert "hi" in out
+    assert captured["proc"] is not None
+    assert hasattr(captured["proc"], "kill")
+
+
+def test_is_dvd_video_forwards_register_proc():
+    captured = {}
+
+    async def fake(cmd, timeout=15.0, register_proc=None):
+        captured["rp"] = register_proc
+        return (0, "Disc Title: X\n", "")
+
+    def reg(proc):
+        pass
+
+    result = asyncio.run(is_dvd_video("/dev/sr0", _run=fake, register_proc=reg))
+    assert result is True
+    assert captured["rp"] is reg
+
+
+def test_is_dvd_video_default_no_register_proc_kwarg():
+    """Old-style fake without register_proc must still work (None path)."""
+    async def fake(cmd, timeout=15.0):
+        return (0, "Disc Title: X\n", "")
+
+    assert asyncio.run(is_dvd_video("/dev/sr0", _run=fake)) is True

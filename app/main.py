@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -37,6 +37,7 @@ from .models import (
 from .musicbrainz import MusicBrainzClient
 from .push import PushSender
 from .ripper import Ripper
+from .scan_coordinator import ScanBusyError, ScanCoordinator
 from .tmdb import TMDBClient
 
 logging.basicConfig(
@@ -108,6 +109,7 @@ async def lifespan(app: FastAPI):
     app.state.musicbrainz = musicbrainz
     app.state.library = library
     app.state.push = push
+    app.state.scan_coordinator = ScanCoordinator()
     try:
         yield
     finally:
@@ -195,26 +197,41 @@ async def library_page(request: Request) -> HTMLResponse:
 
 @app.get("/api/scan", response_model=ScanResult)
 async def api_scan(request: Request) -> ScanResult:
-    # A running rip is using the optical drive; scanning it concurrently spins the
-    # disc and can disrupt the rip (especially Blu-ray/makemkvcon). Refuse to touch
-    # the drive while a rip is active — any client (incl. an auto-scan on page load)
-    # gets 409 instead. Progress is still visible via /api/jobs.
+    # A running rip owns the optical drive; refuse to touch it mid-rip.
     ripper: Ripper = request.app.state.ripper
     if ripper.is_busy():
         raise HTTPException(status_code=409, detail="Rip in progress; disc scan unavailable")
-    # Audio CD is the cheapest, most specific probe (libdiscid, ~1s). A data
-    # DVD/BD makes discid.read raise, so this falls through to the video paths.
-    if await cd.is_audio_cd(DVD_DEVICE):
-        return await cd.scan(DVD_DEVICE, mb_client=request.app.state.musicbrainz)
-    # Route DVDs straight to the DVD scanner: a quick lsdvd probe avoids running
-    # makemkvcon (the Blu-ray detector) on a disc it would never rip. Only non-DVD
-    # discs go to makemkvcon-based Blu-ray detection.
-    if await is_dvd_video(DVD_DEVICE):
-        return await scan(DVD_DEVICE)
-    bd = await bluray_detect_and_scan(DVD_DEVICE)
-    if bd is not None:
-        return bd
-    return await scan(DVD_DEVICE)
+    coordinator: ScanCoordinator = request.app.state.scan_coordinator
+
+    async def _probe(register_proc) -> ScanResult:
+        # Audio CD is the cheapest, most specific probe (libdiscid, ~1s); it is
+        # an in-process call, so it is not subprocess-cancelable (see dvd-rip-r6n).
+        if await cd.is_audio_cd(DVD_DEVICE):
+            return await cd.scan(DVD_DEVICE, mb_client=request.app.state.musicbrainz)
+        if coordinator.cancelled:
+            return ScanResult(dvd_label="UNKNOWN_DVD", titles=[])
+        if await is_dvd_video(DVD_DEVICE, register_proc=register_proc):
+            return await scan(DVD_DEVICE, register_proc=register_proc)
+        if coordinator.cancelled:
+            return ScanResult(dvd_label="UNKNOWN_DVD", titles=[])
+        bd = await bluray_detect_and_scan(DVD_DEVICE, register_proc=register_proc)
+        if bd is not None:
+            return bd
+        if coordinator.cancelled:
+            return ScanResult(dvd_label="UNKNOWN_DVD", titles=[])
+        return await scan(DVD_DEVICE, register_proc=register_proc)
+
+    try:
+        return await coordinator.run(_probe)
+    except ScanBusyError:
+        raise HTTPException(status_code=409, detail="Scan already in progress")
+
+
+@app.post("/api/scan/cancel")
+async def api_scan_cancel(request: Request) -> dict:
+    coordinator: ScanCoordinator = request.app.state.scan_coordinator
+    cancelled = await coordinator.cancel()
+    return {"cancelled": cancelled}
 
 
 @app.get("/api/search")
@@ -240,7 +257,20 @@ async def api_tv_episodes(tv_id: int, season: int, request: Request) -> list[TMD
     return await tmdb.get_tv_season_episodes(tv_id, season)
 
 
-@app.post("/api/rip")
+def _require_scan_idle(request: Request) -> None:
+    """Route dependency: reject a rip while a scan owns the drive.
+
+    Declared as a `Depends`, not an inline check in the handler body: FastAPI
+    resolves declared dependencies before it validates/parses the JSON request
+    body, so this fires (and returns 409) even for a malformed payload that
+    would otherwise 422 before the handler's first line ever runs.
+    """
+    coordinator: ScanCoordinator = request.app.state.scan_coordinator
+    if coordinator.busy:
+        raise HTTPException(status_code=409, detail="Scan in progress; wait for it to finish or cancel it")
+
+
+@app.post("/api/rip", dependencies=[Depends(_require_scan_idle)])
 async def api_rip(payload: RipRequest, request: Request) -> dict:
     if not payload.titles:
         raise HTTPException(status_code=400, detail="No titles selected")
@@ -272,7 +302,7 @@ async def api_rip(payload: RipRequest, request: Request) -> dict:
     return {"job_ids": job_ids}
 
 
-@app.post("/api/cd/rip")
+@app.post("/api/cd/rip", dependencies=[Depends(_require_scan_idle)])
 async def api_cd_rip(payload: CDRipRequest, request: Request) -> dict:
     if not any(t.include for t in payload.tracks):
         raise HTTPException(status_code=400, detail="No tracks selected")
