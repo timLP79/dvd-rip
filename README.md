@@ -13,11 +13,23 @@ A single Docker container that turns an inserted DVD into Plex-ready MP4s with a
 
 ## Requirements
 
+Two supported hosts. Linux runs in Docker; macOS runs natively (see
+[macOS](#macos-apple-silicon) for why Docker can't work there).
+
+**Linux (the container path)**
+
 - Linux host (tested on Ubuntu 24.04) with an attached DVD drive at `/dev/sr0`
   (override via the `DVD_DEVICE` env var)
 - Docker + `docker compose`
 - For Speed mode: Nvidia GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
   installed and configured for Docker
+
+**macOS (the native path)**
+
+- Apple Silicon or Intel Mac, macOS 11+
+- A USB optical drive (Macs have had no internal one for years)
+- Homebrew, and Python 3.11–3.13 (**not** 3.14 — see [macOS](#macos-apple-silicon))
+- Quality mode only; there is no NVENC
 
 ## Run it
 
@@ -162,12 +174,72 @@ for DVD VOBSUB. Both formats coexist in one Plex library.
 
 The DVD path is unchanged — no extra config needed for DVD-only use.
 
+## macOS (Apple Silicon)
+
+On macOS the app runs **natively**, not in Docker.
+
+> **Docker cannot work here.** `docker-compose.yml` device-maps the optical drive
+> (`/dev/sr0`, plus its SCSI-generic node for MakeMKV) into the container. On macOS
+> Docker runs inside a Linux VM with no USB or optical passthrough, so that mapping
+> can never resolve — a container would report "no disc" forever. `make up` detects
+> macOS and says so rather than failing obscurely.
+
+### Setup
+
+```bash
+brew install handbrake libdvdcss lsdvd flac lame libcdio-paranoia libdiscid
+make doctor     # checks tools, drive, encoders, and library loading
+make native     # creates .venv if needed, then serves on http://localhost:8000
+```
+
+`make doctor` is the fastest way to diagnose problems here, because almost every
+failure on this platform is silent: a missing `libdvdcss` produces an unreadable
+disc rather than an error, and a wrong libdiscid device makes an audio CD scan as
+a DVD. It reports each dependency, whether a drive and disc are present, and
+whether the raw device is readable.
+
+For Blu-ray, install MakeMKV from <https://www.makemkv.com/download/> — the
+Homebrew cask is deprecated because it fails macOS Gatekeeper. The app finds
+`makemkvcon` inside `/Applications/MakeMKV.app` automatically; override with
+`MAKEMKVCON_BIN`.
+
+### What differs from Linux
+
+| | Linux | macOS |
+|---|---|---|
+| Runs in | Docker container | Natively (`make native`) |
+| Drive path | `/dev/sr0`, fixed | `/dev/rdiskN`, **auto-detected per scan** via `drutil` |
+| Speed mode | NVENC H.264 | **Unavailable** — the toggle is hidden and the API rejects it |
+| cdparanoia | `cdparanoia` | `cd-paranoia` (libcdio) |
+| Rips land in | `${OUTPUT_DIR}` → `/output` | `~/Movies/dvd-rip` |
+| Rip ledger | `./data/library.db` | `~/Library/Application Support/dvd-rip/library.db` |
+
+**No Speed mode.** Apple Silicon has no NVENC. VideoToolbox (`vt_h264`) exists but
+is deliberately not wired up: on an M-series CPU, x264 on SD DVD content already
+runs many times faster than realtime, so a hardware encoder would trade quality
+for a speedup you don't need. Requesting `speed` returns HTTP 400 rather than
+silently falling back to x264 — a silent downgrade is indistinguishable from a hang.
+
+**The drive is detected per scan**, not pinned at startup, so a drive plugged in
+after the app is running is picked up on the next **Rescan** with no restart. Pin
+it with `DVD_DEVICE=/dev/rdisk4` to skip detection.
+
+**Python 3.14 does not work.** The pinned `pydantic-core` publishes no wheels for
+3.14, and on the free-threaded `3.14t` build pip falls back to compiling Rust,
+which fails against PyO3 0.22. The repo pins 3.12.13 via `.tool-versions`, and the
+Makefile picks the newest interpreter that has wheels; override with
+`make native PYTHON=python3.13`.
+
+**Full Disk Access.** macOS may deny raw reads of `/dev/rdiskN` from a sandboxed
+terminal. If `make doctor` reports the device is not readable, grant your terminal
+Full Disk Access in System Settings → Privacy & Security.
+
 ## Configuration
 
 | Env var       | Default       | Notes                                       |
 | ------------- | ------------- | ------------------------------------------- |
-| `DVD_DEVICE`  | `/dev/sr0`    | Path inside the container (mapped via compose) |
-| `OUTPUT_ROOT` | `/output`     | Where the container writes; mounted as `${OUTPUT_DIR}` |
+| `DVD_DEVICE`  | `/dev/sr0`    | Path inside the container (mapped via compose). On macOS, unset means auto-detect per scan |
+| `OUTPUT_ROOT` | `/output`     | Where the container writes; mounted as `${OUTPUT_DIR}`. macOS: `~/Movies/dvd-rip` |
 | `PUID`        | `1000`        | UID to run the app as (auto-set by `make` to `id -u`) |
 | `PGID`        | `1000`        | GID to run the app as (auto-set by `make` to `id -g`) |
 | `CDROM_GID`   | `24`          | Host's cdrom group GID (auto-set by `make` from `getent group cdrom`) |
@@ -177,6 +249,10 @@ The DVD path is unchanged — no extra config needed for DVD-only use.
 | `MAKEMKV_SCRATCH` | `/data/scratch` | Scratch dir for transient decrypt MKVs (~40 GB needed) |
 | `MAKEMKV_SDF_STOP` | _(unset)_ | Drive id to run in standard (non-LibreDrive) mode — avoids the 100%-CPU SDF hang on most USB BD drives |
 | `LOG_LEVEL`   | `INFO`        | `DEBUG` for verbose HandBrake stdout        |
+| `DISCID_DEVICE` | _(auto)_    | macOS only: libdiscid names drives by index (`1`), not path — override if the wrong drive is read |
+| `MAKEMKVCON_BIN` | `makemkvcon` | Path to the binary; macOS auto-falls back to `/Applications/MakeMKV.app/…` |
+| `MAKEMKV_SOURCE` | `dev:<device>` | Disc argument for makemkvcon. Set to `disc:N` if `dev:` isn't recognised (`makemkvcon -r info disc:9999` lists drives) |
+| `CDPARANOIA_BIN` | `cdparanoia` | `cd-paranoia` on macOS (libcdio's build)   |
 
 The compose file maps `${DVD_DEVICE:-/dev/sr0}` from host to `/dev/sr0` inside the container,
 `${OUTPUT_DIR:-./output}` to `/output`, and `./data` to `/data` (the rip ledger).
@@ -223,6 +299,9 @@ fails), pre-create the directory owned by your `PUID:PGID` and the chown is a no
 - Verify the container can read the device: `docker compose exec dvd-rip lsdvd /dev/sr0`
 - If your DVD drive isn't `/dev/sr0`, set `DVD_DEVICE=/dev/sr1` (or whichever) before
   `docker compose up`
+- **macOS:** run `make doctor` — it checks the drive, the disc and every tool in one
+  pass. If the header reads "no drive detected", `drutil status` sees no optical
+  drive at all (unplugged, or asleep on a bus-powered hub).
 
 ### CSS decryption errors
 
@@ -251,14 +330,30 @@ container scan fails with a permission error:
 ## Development
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt pytest httpx
-.venv/bin/python -m pytest tests/ -v
-.venv/bin/uvicorn app.main:app --reload
+make test          # creates .venv (from requirements-dev.txt) and runs pytest
+make dev           # uvicorn with --reload
+make native        # run against real tools, no reload (the macOS run path)
 ```
 
-Note: running outside Docker won't decrypt commercial DVDs unless `libdvdcss2` is installed
-on the host.
+Or by hand:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+```
+
+Use `requirements-dev.txt`, not `requirements.txt` + a guess: the suite needs
+`pytest-asyncio` (pytest.ini sets `asyncio_mode=auto`) and `respx` (mocks TMDB and
+MusicBrainz), and without them every async test errors at collection.
+
+The tests never touch an optical drive: DVD scans replay recorded fixtures, CD
+tests inject fake disc readers and subprocess spawners, and `conftest.py` pins
+`DVD_DEVICE` so device auto-detection never shells out during a test run.
+
+Note: running outside Docker won't decrypt commercial DVDs unless `libdvdcss` is
+installed on the host (`brew install libdvdcss` on macOS, where HandBrake links it
+directly).
 
 ## Why these defaults?
 

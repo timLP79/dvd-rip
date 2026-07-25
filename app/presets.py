@@ -5,6 +5,8 @@ are an Android phone + Chromecasts, which transcode HEVC):
 
 - QUALITY: x264 CPU, CRF 20, slow preset. Transparent for SD; fast on a modern CPU.
 - SPEED:   nvenc_h264 (Nvidia GPU), CQ 22, slow preset. Near-instant; fine for TVs.
+           Only on hosts that have the encoder — macOS has no NVENC, so Speed mode
+           is rejected there rather than silently downgraded (see hostenv).
 
 H.264 is chosen over H.265 deliberately: at DVD resolution (480p) HEVC's
 compression edge shrinks to ~20-30%, while H.264 8-bit is the one format every
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
+from . import hostenv
 from .models import EncoderMode
 
 
@@ -122,8 +125,16 @@ def build_handbrake_args(
             "--quality", "20",
         ]
     elif encoder_mode is EncoderMode.SPEED:
+        # No hardware encoder on this host (macOS — see hostenv.SPEED_ENCODER).
+        # Fail loudly instead of silently substituting x264: the user picked Speed
+        # expecting a fast GPU rip, and a silent swap would just look like a hang.
+        if hostenv.SPEED_ENCODER is None:
+            raise ValueError(
+                "Speed mode is unavailable on this host (no supported hardware "
+                "encoder); use Quality mode."
+            )
         args += [
-            "--encoder", "nvenc_h264",
+            "--encoder", hostenv.SPEED_ENCODER,
             "--encoder-preset", "slow",
             "--quality", "22",
         ]

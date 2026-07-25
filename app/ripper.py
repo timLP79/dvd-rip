@@ -18,7 +18,7 @@ import shlex
 import time
 from collections import deque
 from pathlib import Path
-from typing import AsyncIterator, Deque, Optional
+from typing import AsyncIterator, Awaitable, Callable, Deque, Optional
 
 from .models import (
     ContentType,
@@ -53,8 +53,14 @@ class Ripper:
     """Owns the job queue, the worker task, and progress fanout."""
 
     def __init__(self, *, device: str, output_root: Path, library: Optional[Library] = None,
-                 scratch_dir: str = "/data/scratch", push: Optional[PushSender] = None):
+                 scratch_dir: str = "/data/scratch", push: Optional[PushSender] = None,
+                 device_provider: Optional[Callable[[], Awaitable[str]]] = None):
         self.device = device
+        # macOS has no stable optical device path (see hostenv), so the device is
+        # re-resolved when a job starts rather than pinned at construction —
+        # otherwise a drive plugged in after startup would never be found. Left
+        # None on Linux, where `device` is a fixed configured path.
+        self.device_provider = device_provider
         self.output_root = output_root
         self.library = library
         self.scratch_dir = scratch_dir
@@ -74,6 +80,17 @@ class Ripper:
         # weak ref to tasks, so an un-retained create_task() can be garbage-collected
         # mid-flight — silently dropping the notification before its send completes.
         self._notify_tasks: set[asyncio.Task] = set()
+
+    async def _resolve_device(self) -> str:
+        """The optical device to use for the job about to run.
+
+        Refreshes the cached value so the UI's displayed device and any later job
+        agree with what was actually used.
+        """
+        if self.device_provider is None:
+            return self.device
+        self.device = await self.device_provider()
+        return self.device
 
     async def start(self) -> None:
         if self._worker_task is None or self._worker_task.done():
@@ -292,7 +309,7 @@ class Ripper:
                              selection: TitleSelection, encoder_mode: EncoderMode,
                              burn_forced: bool, tail: Deque[str]) -> int:
         args = build_handbrake_args(
-            device=self.device,
+            device=await self._resolve_device(),
             title_index=selection.index,
             output_path=output_path,
             audio_tracks=selection.audio_tracks,
@@ -330,7 +347,7 @@ class Ripper:
             self._current_job_id = job_id
             try:
                 mkv_path = await bluray.decrypt_title(
-                    self.device, selection.index, self.scratch_dir,
+                    await self._resolve_device(), selection.index, self.scratch_dir,
                     on_progress=_prog,
                     on_stage=_stage,
                     register_proc=lambda pr: setattr(self, "_current_process", pr),
@@ -383,7 +400,7 @@ class Ripper:
         self._current_job_id = job_id
         try:
             written = await cd.rip_disc(
-                self.device, mode=request.mode, output_root=self.output_root,
+                await self._resolve_device(), mode=request.mode, output_root=self.output_root,
                 creator=request.creator, title=request.title, year=request.year,
                 disc_number=request.disc_number, total_discs=request.total_discs,
                 tracks=request.tracks, scratch_dir=self.scratch_dir,

@@ -4,6 +4,10 @@ The only module that touches `libdiscid`/`cdparanoia`/`flac`/`lame`. Parallels
 bluray.py. The disc reader and subprocess spawner are injectable so no test
 requires a physical CD or these tools installed.
 
+Note the two device conventions in play: `device` here is whatever the *reading*
+tool expects, and libdiscid does not agree with cdparanoia about that on macOS —
+callers resolve both through `hostenv` (see `hostenv.discid_device`).
+
 Audiobook mode joins all included tracks into ONE MP3 per disc, or (when the
 user opts to split) emits one titled MP3 per track; music mode emits one FLAC
 per track (design decisions 8-9).
@@ -17,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+from . import hostenv
 from .models import CDTrack, CDTrackSelection, MBRelease, ScanResult
 from .paths import (
     audiobook_path,
@@ -270,7 +275,7 @@ async def rip_disc(
                 (lambda f, _i=i: on_progress(round((_i + f) / total * scale, 1)))
                 if on_progress else None)
             rc, out = await _extract_track(
-                ["cdparanoia", "-d", device, str(t.number), str(wav)],
+                [hostenv.CDPARANOIA_BIN, "-d", device, str(t.number), str(wav)],
                 wav=wav, expected_bytes=(t.duration_seconds or 0) * _CDDA_BYTES_PER_SEC,
                 on_frac=on_frac, register_proc=register_proc, spawn=spawn)
             if rc != 0:

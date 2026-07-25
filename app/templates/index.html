@@ -74,9 +74,14 @@
     <section id="titles-section" class="panel" hidden>
       <div class="section-head">
         <h2>Titles</h2>
+        {# Speed mode needs an Nvidia GPU. On a host without one (macOS) the radio
+           group would be a single dead option, so render only the Quality input —
+           app.js still reads encoder_mode from it and the API rejects "speed". #}
         <div class="encoder-toggle" role="radiogroup" aria-label="Encoder mode">
           <label><input type="radio" name="encoder_mode" value="quality" checked /> <span>Quality <em>x264 · CPU</em></span></label>
+          {% if speed_available %}
           <label><input type="radio" name="encoder_mode" value="speed" /> <span>Speed <em>NVENC H.264 · GPU</em></span></label>
+          {% endif %}
         </div>
       </div>
       <table id="titles" class="titles">

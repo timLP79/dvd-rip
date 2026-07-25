@@ -53,7 +53,11 @@ bd close <id>         # Complete work
 ## Build & Test
 
 ```bash
-# Container (production path)
+# macOS (native — the ONLY working path there; Docker cannot see an optical drive)
+make doctor           # check toolchain, drive, encoders, library loading
+make native           # create .venv if needed, then serve on :8000
+
+# Container (production path — Linux only)
 make build            # build the Docker image (~5–10 min first time)
 make up-d             # start detached
 make logs             # tail container logs
@@ -93,6 +97,7 @@ Module map (all in `app/`):
 
 | File | Responsibility |
 |---|---|
+| `hostenv.py` | The one seam for host-OS differences — optical-device detection/naming (macOS has no stable path, and libdiscid names drives differently from everything else), tool binary names (`cd-paranoia` vs `cdparanoia`, `makemkvcon` inside an .app), storage defaults, and whether a Speed-mode hardware encoder exists. Anything platform-conditional belongs here, not scattered across modules |
 | `main.py` | FastAPI routes (`/api/scan` routes CD→DVD→Blu-ray, `/api/scan/cancel`, `/api/search`, `/api/rip`, `/api/cd/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
 | `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult`; `is_dvd_video()` fast lsdvd probe so DVDs skip makemkvcon |
 | `bluray.py` | MakeMKV front-end — detect BD, scan titles, decrypt a title to a temp MKV (the only module that touches `makemkvcon`) |
@@ -126,4 +131,20 @@ Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`)
 - **Plex naming** matches the user's existing library convention exactly: TV shows omit the year (`TV Shows/Deadwood/Season 01/Deadwood S01E01.mp4`), movies use `Movies/Title (Year)/Title (Year).mp4` with `- cd2` etc. for multi-part. Sanitization strips OS-illegal chars but keeps spaces and `!`.
 - **CD ripping** — audio CDs are Red Book (no filesystem); a CD track is never a chapter. Audiobook = **one joined MP3 per disc** by default (a 96-track seek-index disc must never become 96 files), with an optional **split-by-MusicBrainz** mode (per-title MP3s) when the exact disc-ID hit carries titles. MusicBrainz is **exact disc-ID only** (fuzzy TOC returns false positives — bird-song CDs, jingle libraries). Full design + field evaluation: `docs/superpowers/specs/2026-07-04-cd-rip-design.md`.
 - **Tests** never depend on a real optical drive — DVD uses recorded `tests/fixtures/scan_*.txt`; CD injects fake disc readers + subprocess spawners (no `cdparanoia`/`libdiscid`/`flac`/`lame` needed); `respx` mocks TMDB **and** MusicBrainz HTTP.
+- **Two hosts, one codebase.** Linux runs the container (production); macOS runs
+  natively via `make native` because Docker's Linux VM on macOS has no optical/USB
+  passthrough — the compose `devices:` mapping can never resolve, so a container
+  would report "no disc" forever. Keep every platform difference inside `hostenv.py`;
+  Linux behaviour must stay byte-identical.
+- **The optical device is resolved per scan/job on macOS**, not pinned at startup, so
+  a drive plugged in later works without a restart. Three consumers want three
+  different names for the same drive: HandBrake/lsdvd/MakeMKV take `/dev/rdiskN`,
+  libdiscid takes a drive *index*, cdparanoia takes the raw path.
+- **No silent encoder substitution.** macOS has no NVENC; Speed mode is hidden in the
+  UI and rejected with a 400 rather than quietly falling back to x264 — a silent
+  downgrade is indistinguishable from a hang.
+- **Python 3.11–3.13 only.** The pinned pydantic-core has no 3.14 wheels and fails to
+  compile on free-threaded 3.14t. Pinned via `.tool-versions`; the Makefile also picks
+  a working interpreter. Test deps live in `requirements-dev.txt` (`pytest-asyncio` is
+  mandatory — pytest.ini sets `asyncio_mode=auto`).
 - **Secrets** (just `TMDB_API_KEY` today) live in `.env`, which is gitignored. `.env.example` is the template.
