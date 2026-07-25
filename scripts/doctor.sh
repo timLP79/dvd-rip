@@ -71,6 +71,21 @@ if [ -f .env ] && grep -qE '^MAKEMKV_APP_KEY=.+' .env; then
   ok "MakeMKV key" "set in .env"
 else
   warn "MakeMKV key" "MAKEMKV_APP_KEY unset — Blu-ray decryption will fail"
+  note "Free beta key (rotates ~monthly): https://forum.makemkv.com/forum/viewtopic.php?t=1053"
+fi
+
+# makemkvcon's update check hangs the scan at high CPU when makemkv.com is
+# unreachable (dvd-rip-br7), and it is ON by default.
+MAKEMKV_CONF="$HOME/Library/MakeMKV/settings.conf"
+if [ -f "$MAKEMKV_CONF" ]; then
+  if grep -q 'app_UpdateEnable *= *"0"' "$MAKEMKV_CONF"; then
+    ok "MakeMKV config" "update check disabled"
+  else
+    warn "MakeMKV config" "update check still enabled — scans can hang if makemkv.com is down"
+    note "Add   app_UpdateEnable = \"0\"   to $MAKEMKV_CONF"
+  fi
+elif [ -x "$MAKEMKV_APP" ] || command -v makemkvcon >/dev/null 2>&1; then
+  warn "MakeMKV config" "no settings.conf — 'make native' writes one once MAKEMKV_APP_KEY is set"
 fi
 
 if [ -f .env ] && grep -qE '^TMDB_API_KEY=.+' .env; then
@@ -117,26 +132,35 @@ if [ -n "${DVD_DEVICE:-}" ]; then
   ok "DVD_DEVICE" "$DVD_DEVICE (pinned; auto-detection skipped)"
 elif [ "$(uname -s)" = "Darwin" ]; then
   status=$(drutil status 2>/dev/null)
+  # `drutil status` prints nothing at all with no drive attached; with an empty
+  # tray it prints the drive but no Name field, because macOS creates no /dev node
+  # until media is loaded. Those two cases need different advice.
+  model=$(printf '%s' "$status" | sed -n '2p' | sed 's/^ *//;s/ *$//')
   device=$(printf '%s' "$status" | sed -n 's/.*Name: *\(\/dev\/disk[0-9]*\).*/\1/p' | head -1)
-  if [ -n "$device" ]; then
-    raw="/dev/r${device#/dev/}"
-    type=$(printf '%s' "$status" | sed -n 's/.*Type: *\([A-Za-z0-9 -]*[A-Za-z0-9]\).*/\1/p' | head -1)
-    ok "optical drive" "$device → $raw"
-    if [ "$type" = "No Media" ]; then
-      warn "disc" "drive is empty — insert a disc to scan"
-    else
-      ok "disc" "$type"
-    fi
-    if [ -r "$raw" ]; then
-      ok "read access" "$raw readable"
-    else
-      bad "read access" "$raw not readable by $(whoami)"
-      note "Grant Terminal 'Full Disk Access' in System Settings > Privacy & Security,"
-      note "or run with sudo."
-    fi
-  else
+  # BSD sed has no non-greedy match, so strip the Name field (and padding) in
+  # separate passes rather than trying to express it in one pattern.
+  type=$(printf '%s' "$status" | sed -n 's/^ *Type: *//p' | head -1 \
+         | sed 's/  *Name:.*//' | sed 's/ *$//')
+  if [ -z "$status" ]; then
     bad "optical drive" "none detected"
     note "Plug in a USB optical drive. 'drutil status' shows nothing without one."
+  else
+    ok "optical drive" "${model:-attached}"
+    if [ -n "$device" ]; then
+      raw="/dev/r${device#/dev/}"
+      ok "disc" "${type:-present} → $raw"
+      if [ -r "$raw" ]; then
+        ok "read access" "$raw readable"
+      else
+        bad "read access" "$raw not readable by $(whoami)"
+        note "Grant your terminal 'Full Disk Access' in System Settings >"
+        note "Privacy & Security, then try again."
+      fi
+    else
+      warn "disc" "${type:-no disc} — insert one to scan"
+      note "macOS creates no /dev node until media is loaded, so the device path"
+      note "appears only with a disc in the tray. Everything else is ready."
+    fi
   fi
 else
   if [ -r "${DVD_DEVICE:-/dev/sr0}" ]; then ok "optical drive" "${DVD_DEVICE:-/dev/sr0}"

@@ -198,10 +198,16 @@ disc rather than an error, and a wrong libdiscid device makes an audio CD scan a
 a DVD. It reports each dependency, whether a drive and disc are present, and
 whether the raw device is readable.
 
-For Blu-ray, install MakeMKV from <https://www.makemkv.com/download/> — the
-Homebrew cask is deprecated because it fails macOS Gatekeeper. The app finds
-`makemkvcon` inside `/Applications/MakeMKV.app` automatically; override with
-`MAKEMKVCON_BIN`.
+For Blu-ray, install MakeMKV from <https://www.makemkv.com/download/> — download the
+`.dmg` and drag `MakeMKV.app` to `/Applications` (the Homebrew cask is deprecated
+because it fails macOS Gatekeeper). The app finds `makemkvcon` inside the bundle
+automatically; override with `MAKEMKVCON_BIN`.
+
+Then set `MAKEMKV_APP_KEY` in `.env` (the free beta key, which rotates roughly
+monthly). On its first run `make native` writes `~/Library/MakeMKV/settings.conf`
+with that key and `app_UpdateEnable = "0"` — the update check hangs scans at high
+CPU whenever makemkv.com is unreachable, and it is on by default. An existing
+settings.conf is never overwritten, since the MakeMKV GUI owns that file too.
 
 ### What differs from Linux
 
@@ -249,6 +255,7 @@ Full Disk Access in System Settings → Privacy & Security.
 | `MAKEMKV_SCRATCH` | `/data/scratch` | Scratch dir for transient decrypt MKVs (~40 GB needed) |
 | `MAKEMKV_SDF_STOP` | _(unset)_ | Drive id to run in standard (non-LibreDrive) mode — avoids the 100%-CPU SDF hang on most USB BD drives |
 | `LOG_LEVEL`   | `INFO`        | `DEBUG` for verbose HandBrake stdout        |
+| `HANDBRAKE_SCAN_TIMEOUT` | `600` | Seconds HandBrake gets to scan disc structure. Measured: ~26 s for an ordinary DVD, but a copy-protected dual-layer disc exceeded 120 s |
 | `DISCID_DEVICE` | _(auto)_    | macOS only: libdiscid names drives by index (`1`), not path — override if the wrong drive is read |
 | `MAKEMKVCON_BIN` | `makemkvcon` | Path to the binary; macOS auto-falls back to `/Applications/MakeMKV.app/…` |
 | `MAKEMKV_SOURCE` | `dev:<device>` | Disc argument for makemkvcon. Set to `disc:N` if `dev:` isn't recognised (`makemkvcon -r info disc:9999` lists drives) |
@@ -300,8 +307,28 @@ fails), pre-create the directory owned by your `PUID:PGID` and the chown is a no
 - If your DVD drive isn't `/dev/sr0`, set `DVD_DEVICE=/dev/sr1` (or whichever) before
   `docker compose up`
 - **macOS:** run `make doctor` — it checks the drive, the disc and every tool in one
-  pass. If the header reads "no drive detected", `drutil status` sees no optical
-  drive at all (unplugged, or asleep on a bus-powered hub).
+  pass. "no drive detected" means `drutil status` sees no optical drive at all
+  (unplugged, or asleep on a bus-powered hub); "drive ready — no disc" means the
+  drive is fine and the tray is empty. macOS creates no `/dev/diskN` node until
+  media is loaded, so the device path only appears with a disc in.
+
+### Scan is slow, or reports "Disc scan timed out"
+
+Some discs use structural copy protection (ARccOS and friends) that pads the disc
+with a dozen or more decoy two-hour titles. HandBrake walks every one of them, and
+over a USB optical bus that can take many minutes.
+
+Measured on an external USB Blu-ray drive: an ordinary DVD scans in **~26 s**; a
+protected dual-layer disc blew past 120 s. That is why the budget defaults to 600 s.
+If you hit the timeout, raise it and rescan:
+
+```bash
+make native HANDBRAKE_SCAN_TIMEOUT=1800
+```
+
+A timed-out scan now says so explicitly. It used to render as "No titles found",
+which is indistinguishable from a blank disc and sends you to swap a disc that was
+fine.
 
 ### CSS decryption errors
 

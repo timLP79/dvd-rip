@@ -133,7 +133,11 @@ async function scan() {
       return;
     }
     if (!data.titles.length) {
-      status.textContent = 'No titles found. Insert a disc and click Rescan.';
+      // The server tells us WHY it came back empty when it knows (e.g. the scan
+      // timed out on a copy-protected disc). Showing the generic "no titles"
+      // there sends the user to swap a disc that was actually fine.
+      status.textContent = data.warning
+        || 'No titles found. Insert a disc and click Rescan.';
       return;
     }
     renderDiscMeta(data);

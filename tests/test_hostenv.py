@@ -10,9 +10,10 @@ import pytest
 from app import hostenv
 
 
-# Real `drutil status` output, disc inserted, from an external USB drive.
+# `drutil status` with a disc loaded, in the shape drutil documents: the device
+# path shares a line with the disc type, separated by column padding.
 DRUTIL_WITH_DISC = """ Vendor   Product           Rev
- HL-DT-ST DVDRAM GP60NB60   RA00
+ PIONEER  BD-RW   BDR-XD08  1.00
 
            Type: DVD-ROM               Name: /dev/disk4
        Sessions: 1                  Tracks: 1
@@ -23,12 +24,13 @@ DRUTIL_WITH_DISC = """ Vendor   Product           Rev
       Book Type: DVD-ROM (v1)
 """
 
-# Drive attached, tray empty. The drive is still named, which is what lets the app
-# report "no disc" instead of "no drive".
+# VERBATIM `drutil status` from a Pioneer BDR-XD08 with the tray empty. Note there
+# is NO Name field: macOS creates no /dev node until media is loaded. Captured from
+# real hardware — an earlier guess here (a Name on the No Media line) was wrong.
 DRUTIL_NO_DISC = """ Vendor   Product           Rev
- HL-DT-ST DVDRAM GP60NB60   RA00
+ PIONEER  BD-RW   BDR-XD08  1.00
 
-           Type: No Media              Name: /dev/disk4
+           Type: No Media Inserted
 """
 
 
@@ -36,8 +38,9 @@ def test_parse_drutil_finds_device_with_disc():
     assert hostenv.parse_drutil_device(DRUTIL_WITH_DISC) == "/dev/disk4"
 
 
-def test_parse_drutil_finds_drive_with_empty_tray():
-    assert hostenv.parse_drutil_device(DRUTIL_NO_DISC) == "/dev/disk4"
+def test_parse_drutil_empty_tray_has_no_device():
+    """An empty tray has no /dev node to find — the drive is still there."""
+    assert hostenv.parse_drutil_device(DRUTIL_NO_DISC) is None
 
 
 def test_parse_drutil_no_drive_attached():
@@ -47,6 +50,18 @@ def test_parse_drutil_no_drive_attached():
 
 def test_parse_drutil_ignores_unrelated_output():
     assert hostenv.parse_drutil_device("some other tool's output\n") is None
+
+
+def test_parse_drutil_media_type_with_disc():
+    assert hostenv.parse_drutil_media(DRUTIL_WITH_DISC) == "DVD-ROM"
+
+
+def test_parse_drutil_media_type_empty_tray():
+    assert hostenv.parse_drutil_media(DRUTIL_NO_DISC) == "No Media Inserted"
+
+
+def test_parse_drutil_media_type_no_drive():
+    assert hostenv.parse_drutil_media("") is None
 
 
 def test_raw_device_maps_to_character_node():
@@ -93,25 +108,38 @@ async def test_detect_returns_none_off_macos(monkeypatch):
     assert await hostenv.detect_optical_device() is None
 
 
-async def test_device_label_reports_missing_drive(monkeypatch):
-    """The header must not claim a /dev/sr0 that isn't there."""
+def _status(monkeypatch, status):
     monkeypatch.delenv("DVD_DEVICE", raising=False)
     monkeypatch.setattr(hostenv, "IS_MACOS", True)
 
-    async def _none():
-        return None
-    monkeypatch.setattr(hostenv, "detect_optical_device", _none)
+    async def _probe():
+        return status
+    monkeypatch.setattr(hostenv, "optical_status", _probe)
+
+
+async def test_device_label_reports_missing_drive(monkeypatch):
+    """The header must not claim a /dev/sr0 that isn't there."""
+    _status(monkeypatch, hostenv.OpticalStatus())
     assert await hostenv.device_label() == "no drive detected"
 
 
-async def test_device_label_shows_detected_drive(monkeypatch):
-    monkeypatch.delenv("DVD_DEVICE", raising=False)
-    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+async def test_device_label_distinguishes_empty_tray_from_missing_drive(monkeypatch):
+    """"No drive" sends you looking for a cable; "no disc" sends you for a disc."""
+    _status(monkeypatch, hostenv.OpticalStatus(
+        drive_present=True, media="No Media Inserted"))
+    assert await hostenv.device_label() == "drive ready — no disc"
 
-    async def _found():
-        return "/dev/rdisk4"
-    monkeypatch.setattr(hostenv, "detect_optical_device", _found)
+
+async def test_device_label_shows_detected_drive(monkeypatch):
+    _status(monkeypatch, hostenv.OpticalStatus(
+        device="/dev/rdisk4", drive_present=True, media="DVD-ROM"))
     assert await hostenv.device_label() == "/dev/rdisk4"
+
+
+async def test_optical_status_off_macos_reports_nothing(monkeypatch):
+    monkeypatch.setattr(hostenv, "IS_MACOS", False)
+    status = await hostenv.optical_status()
+    assert status.device is None and status.drive_present is False
 
 
 def test_discid_device_override_wins(monkeypatch):

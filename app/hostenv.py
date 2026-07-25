@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -116,16 +117,28 @@ def default_scratch_dir() -> str:
 # Optical device
 # ---------------------------------------------------------------------------
 
-# `drutil status` prints a block per drive; the device path is on the "Name:" field:
+# `drutil status` prints a block per drive. With a disc loaded:
 #
 #      Vendor   Product           Rev
-#      HL-DT-ST DVDRAM GP60NB50   RA00
+#      PIONEER  BD-RW   BDR-XD08  1.00
 #
 #                Type: DVD-ROM               Name: /dev/disk4
 #
-# With no disc inserted the Type reads "No Media" but the Name is still present,
-# so this detects the *drive*, not the disc.
+# With the tray empty it stops after the Type, and there is NO Name field:
+#
+#                Type: No Media Inserted
+#
+# macOS only creates the /dev/diskN node once media is loaded, so an empty tray
+# genuinely has no device to find. With no drive attached at all, `drutil status`
+# prints nothing whatsoever — which is why drive presence is tracked separately
+# from the device path: "no drive" and "no disc" need different advice.
 _DRUTIL_NAME_RE = re.compile(r"^\s*Name:\s*(/dev/disk\d+)\s*$", re.MULTILINE)
+
+# The Type value runs to end-of-line, except when the Name field shares the line
+# (drutil pads the columns with runs of spaces).
+_DRUTIL_TYPE_RE = re.compile(r"^\s*Type:\s*(.+?)(?:\s{2,}Name:.*)?$", re.MULTILINE)
+
+_NO_MEDIA = "no media"
 
 
 def parse_drutil_device(stdout: str) -> Optional[str]:
@@ -156,14 +169,37 @@ def raw_device(device: str) -> str:
     return device
 
 
-async def detect_optical_device() -> Optional[str]:
-    """Detect the attached optical drive on macOS, or None if there isn't one.
+def parse_drutil_media(stdout: str) -> Optional[str]:
+    """The disc type `drutil status` reports, e.g. "DVD-ROM" or "No Media Inserted".
 
-    Returns a raw device path (`/dev/rdisk4`). Linux always returns None — there
-    the device is a fixed, configured path, not something to go hunting for.
+    None when the output has no Type field at all (no drive attached).
+    """
+    match = _DRUTIL_TYPE_RE.search(stdout)
+    return match.group(1).strip() if match else None
+
+
+@dataclass(frozen=True)
+class OpticalStatus:
+    """What the host can currently see of the optical drive."""
+
+    device: Optional[str] = None       # raw path; None until media is loaded
+    drive_present: bool = False
+    media: Optional[str] = None        # drutil's disc type, if it reported one
+
+    @property
+    def has_media(self) -> bool:
+        return self.device is not None
+
+
+async def optical_status() -> OpticalStatus:
+    """Probe the optical drive on macOS. Off macOS, reports nothing found.
+
+    Distinguishes "no drive" from "drive present, tray empty": the first needs
+    hardware plugged in, the second just needs a disc, and reporting them
+    identically sends people hunting for the wrong problem.
     """
     if not IS_MACOS:
-        return None
+        return OpticalStatus()
     try:
         proc = await asyncio.create_subprocess_exec(
             "drutil", "status",
@@ -173,9 +209,26 @@ async def detect_optical_device() -> Optional[str]:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
     except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
         log.warning("optical drive detection failed: %s", exc)
-        return None
-    cooked = parse_drutil_device(stdout.decode(errors="replace"))
-    return raw_device(cooked) if cooked else None
+        return OpticalStatus()
+    text = stdout.decode(errors="replace")
+    media = parse_drutil_media(text)
+    cooked = parse_drutil_device(text)
+    return OpticalStatus(
+        device=raw_device(cooked) if cooked else None,
+        # `drutil status` prints nothing at all with no drive attached, so any
+        # Type line means a drive answered.
+        drive_present=media is not None,
+        media=media,
+    )
+
+
+async def detect_optical_device() -> Optional[str]:
+    """The optical device path, or None if no drive or no disc.
+
+    Returns a raw device path (`/dev/rdisk4`). Linux always returns None — there
+    the device is a fixed, configured path, not something to go hunting for.
+    """
+    return (await optical_status()).device
 
 
 async def resolve_optical_device() -> str:
@@ -206,7 +259,14 @@ async def device_label() -> str:
         return override
     if not IS_MACOS:
         return _LINUX_DEFAULT_DEVICE
-    return await detect_optical_device() or "no drive detected"
+    status = await optical_status()
+    if status.device:
+        return status.device
+    if status.drive_present:
+        # macOS creates no /dev node until media is loaded, so this is normal —
+        # say "insert a disc", not "no drive".
+        return "drive ready — no disc"
+    return "no drive detected"
 
 
 def discid_device(device: str) -> str:

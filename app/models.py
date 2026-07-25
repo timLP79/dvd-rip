@@ -67,6 +67,10 @@ class ScanResult(BaseModel):
     dvd_label: str
     titles: list[Title] = Field(default_factory=list)
     disc_format: Literal["dvd", "bluray", "cd"] = "dvd"
+    # Why a scan came back empty, when we know. An empty title list otherwise
+    # looks identical whether the disc is blank, unreadable, or the scan simply
+    # timed out — and the user needs a different action in each case.
+    warning: Optional[str] = None
     # Audio-CD fields (empty for video discs):
     tracks: list[CDTrack] = Field(default_factory=list)
     disc_id: Optional[str] = None

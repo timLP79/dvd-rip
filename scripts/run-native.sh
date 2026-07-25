@@ -72,6 +72,32 @@ if [ "$(uname -s)" = "Darwin" ]; then
   fi
 fi
 
+# --- MakeMKV first-run config (Blu-ray only) --------------------------------
+# The container's entrypoint writes this file; running natively, nothing does.
+# app_UpdateEnable=0 stops makemkvcon phoning home for a version check, which
+# hangs the scan at high CPU whenever makemkv.com is unreachable (dvd-rip-br7) —
+# and makemkvcon announces that check is on by default. Beta-key validation is
+# local and unaffected.
+#
+# Written ONLY when absent: this is a real user-level config that the MakeMKV GUI
+# also owns, and clobbering someone's settings to inject a key would be rude.
+if [ "$(uname -s)" = "Darwin" ] && [ -n "${MAKEMKV_APP_KEY:-}" ]; then
+  MAKEMKV_CONF="$HOME/Library/MakeMKV/settings.conf"
+  if [ ! -f "$MAKEMKV_CONF" ]; then
+    mkdir -p "$(dirname "$MAKEMKV_CONF")"
+    {
+      printf 'app_Key = "%s"\n' "$MAKEMKV_APP_KEY"
+      printf 'app_UpdateEnable = "0"\n'
+      # Disables LibreDrive/SDF for the listed drive id. Only needed on drives
+      # that hang in "SDF auto"; standard AACS mode handles 1080p Blu-ray fine.
+      if [ -n "${MAKEMKV_SDF_STOP:-}" ]; then
+        printf 'sdf_Stop = "%s"\n' "$MAKEMKV_SDF_STOP"
+      fi
+    } > "$MAKEMKV_CONF"
+    echo "==> wrote $MAKEMKV_CONF (MakeMKV key + update check disabled)"
+  fi
+fi
+
 # --- Defaults --------------------------------------------------------------
 # Unset values fall through to app/hostenv.py's per-platform defaults, so we
 # deliberately do NOT invent values for OUTPUT_ROOT / LIBRARY_DB / MAKEMKV_SCRATCH
