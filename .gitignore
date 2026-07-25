@@ -12,4 +12,9 @@ venv/
 output/
 data/
 *.egg-info/
+# Secrets. `.env` alone does not cover copies like `.env-from-desktop` or
+# `.env.local`, which is exactly how a key gets committed by accident.
 .env
+.env.*
+.env-*
+!.env.example
