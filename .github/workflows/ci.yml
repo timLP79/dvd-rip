@@ -18,7 +18,11 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio respx
+        # Single source of truth with `make test`. Listing test deps here as well
+        # let the two drift: the Makefile's venv was missing pytest-asyncio and
+        # respx entirely, so `make test` could not even collect the suite while
+        # CI stayed green.
+        run: pip install -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest tests/ -v
