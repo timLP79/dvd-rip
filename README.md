@@ -219,6 +219,13 @@ settings.conf is never overwritten, since the MakeMKV GUI owns that file too.
 | cdparanoia | `cdparanoia` | `cd-paranoia` (libcdio) |
 | Rips land in | `${OUTPUT_DIR}` → `/output` | `~/Movies/dvd-rip` |
 | Rip ledger | `./data/library.db` | `~/Library/Application Support/dvd-rip/library.db` |
+| MakeMKV config | written by the entrypoint | `~/Library/MakeMKV/settings.conf`, written by `make native` |
+
+Verified on macOS against an external USB Pioneer BDR-XD08: **DVD** (scan +
+CSS-decrypted rip) and **Blu-ray** (~16 s to scan 18 titles, then AACS decrypt →
+encode). **Audio CD** has only been exercised negatively — DVDs and Blu-rays are
+correctly *not* routed to the CD scanner — so the libdiscid drive-index path is
+still unconfirmed against a real CD.
 
 **No Speed mode.** Apple Silicon has no NVENC. VideoToolbox (`vt_h264`) exists but
 is deliberately not wired up: on an M-series CPU, x264 on SD DVD content already
@@ -258,7 +265,7 @@ Full Disk Access in System Settings → Privacy & Security.
 | `HANDBRAKE_SCAN_TIMEOUT` | `600` | Seconds HandBrake gets to scan disc structure. Measured: ~26 s for an ordinary DVD, but a copy-protected dual-layer disc exceeded 120 s |
 | `DISCID_DEVICE` | _(auto)_    | macOS only: libdiscid names drives by index (`1`), not path — override if the wrong drive is read |
 | `MAKEMKVCON_BIN` | `makemkvcon` | Path to the binary; macOS auto-falls back to `/Applications/MakeMKV.app/…` |
-| `MAKEMKV_SOURCE` | `dev:<device>` | Disc argument for makemkvcon. Set to `disc:N` if `dev:` isn't recognised (`makemkvcon -r info disc:9999` lists drives) |
+| `MAKEMKV_SOURCE` | `dev:<device>` | Disc argument for makemkvcon. The default is verified working on macOS; override with `disc:N` if your build disagrees (`makemkvcon -r info disc:9999` lists drives) |
 | `CDPARANOIA_BIN` | `cdparanoia` | `cd-paranoia` on macOS (libcdio's build)   |
 
 The compose file maps `${DVD_DEVICE:-/dev/sr0}` from host to `/dev/sr0` inside the container,
