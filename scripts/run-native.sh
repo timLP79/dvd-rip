@@ -79,11 +79,16 @@ fi
 # and makemkvcon announces that check is on by default. Beta-key validation is
 # local and unaffected.
 #
-# Written ONLY when absent: this is a real user-level config that the MakeMKV GUI
-# also owns, and clobbering someone's settings to inject a key would be rude.
+# Written only when absent OR EMPTY: this is a real user-level config that the
+# MakeMKV GUI also owns, and clobbering someone's settings to inject a key would
+# be rude. But the GUI truncates it to 0 bytes on some first-run paths, and an
+# `-f` guard treats that empty file as "already configured" — so the key is never
+# written, makemkvcon falls back to a 30-day evaluation, and app_UpdateEnable
+# stays on (the dvd-rip-br7 phone-home hang). An empty file holds no settings to
+# preserve, so `-s` is the honest test.
 if [ "$(uname -s)" = "Darwin" ] && [ -n "${MAKEMKV_APP_KEY:-}" ]; then
   MAKEMKV_CONF="$HOME/Library/MakeMKV/settings.conf"
-  if [ ! -f "$MAKEMKV_CONF" ]; then
+  if [ ! -s "$MAKEMKV_CONF" ]; then
     mkdir -p "$(dirname "$MAKEMKV_CONF")"
     {
       printf 'app_Key = "%s"\n' "$MAKEMKV_APP_KEY"
