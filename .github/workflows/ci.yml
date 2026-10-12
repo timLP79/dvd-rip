@@ -24,5 +24,8 @@ jobs:
         # CI stayed green.
         run: pip install -r requirements-dev.txt
 
+      - name: Check Compose CLI for deployment regression tests
+        run: docker compose version
+
       - name: Run tests
         run: python -m pytest tests/ -v

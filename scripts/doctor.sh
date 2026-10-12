@@ -176,12 +176,13 @@ if printf '%s' "$encoders" | grep -q '^ *x264 *$'; then
 else
   bad "x264 (Quality)" "HandBrake reports no x264 encoder"
 fi
-if printf '%s' "$encoders" | grep -q 'nvenc_h264'; then
-  ok "nvenc (Speed)" "available"
+if [ ! -x "$VENV_PY" ]; then
+  warn "nvenc (Speed)" "not checked — run make venv, then make doctor"
+elif "$VENV_PY" -c 'from app.hostenv import detect_speed_encoder; raise SystemExit(0 if detect_speed_encoder() else 1)'; then
+  ok "nvenc (Speed)" "test encode passed"
 else
-  warn "nvenc (Speed)" "absent — Speed mode is hidden in the UI; use Quality"
-  note "Expected on Apple Silicon. x264 on SD DVD content still runs many times"
-  note "faster than realtime here."
+  warn "nvenc (Speed)" "unavailable — Speed mode is hidden in the UI; use Quality"
+  note "Expected on Macs and Linux hosts without usable NVIDIA encoding."
 fi
 
 # --- storage ---------------------------------------------------------------

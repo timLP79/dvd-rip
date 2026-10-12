@@ -5,6 +5,10 @@ These are the seams where a wrong value silently misbehaves rather than crashing
 an audio CD look like a DVD), so they get direct coverage.
 """
 
+import subprocess
+from pathlib import Path
+from unittest.mock import Mock
+
 import pytest
 
 from app import hostenv
@@ -196,3 +200,93 @@ def test_ledger_and_scratch_stay_out_of_the_media_tree():
 
 def test_speed_mode_availability_tracks_encoder():
     assert hostenv.speed_mode_available() is (hostenv.SPEED_ENCODER is not None)
+
+
+@pytest.mark.parametrize("output, expected", [
+    ("   -e, --encoder <string>  Select video encoder:\n       x264\n", None),
+    ("       x264\n       qsv_h264\n", None),
+    ("       x264\n       nvenc_h264\n", "nvenc_h264"),
+    ("       nvenc_h265\n", None),
+    ("ERROR: nvenc_h264 unavailable\n", None),
+])
+def test_detect_speed_uses_handbrake_runtime_list(monkeypatch, output, expected):
+    monkeypatch.setattr(hostenv, "IS_MACOS", False)
+    run = Mock(return_value=subprocess.CompletedProcess(
+        ["HandBrakeCLI", "--help"], 0, stdout=output, stderr=""))
+    monkeypatch.setattr(hostenv.subprocess, "run", run)
+    encode = Mock(return_value=True)
+    monkeypatch.setattr(hostenv, "_nvenc_can_encode", encode)
+    assert hostenv.detect_speed_encoder() == expected
+    assert encode.call_count == (1 if expected else 0)
+    assert run.call_args.args[0] == ["HandBrakeCLI", "--help"]
+    assert run.call_args.kwargs["timeout"] == 10
+
+
+@pytest.mark.parametrize("error", [
+    FileNotFoundError("HandBrakeCLI missing"),
+    PermissionError("not executable"),
+    subprocess.TimeoutExpired("HandBrakeCLI", 10),
+])
+def test_detect_speed_failure_keeps_quality_available(monkeypatch, error):
+    monkeypatch.setattr(hostenv, "IS_MACOS", False)
+    monkeypatch.setattr(hostenv.subprocess, "run", Mock(side_effect=error))
+    assert hostenv.detect_speed_encoder() is None
+
+
+def test_detect_speed_rejects_failed_probe_even_if_encoder_is_listed(monkeypatch):
+    monkeypatch.setattr(hostenv, "IS_MACOS", False)
+    monkeypatch.setattr(hostenv.subprocess, "run", Mock(return_value=
+        subprocess.CompletedProcess([], 1, stdout="    nvenc_h264\n", stderr="failed")))
+    assert hostenv.detect_speed_encoder() is None
+
+
+@pytest.mark.parametrize("failure", [False, subprocess.TimeoutExpired("HandBrakeCLI", 20)])
+def test_listed_nvenc_is_rejected_when_encoding_fails(monkeypatch, failure):
+    monkeypatch.setattr(hostenv, "IS_MACOS", False)
+    monkeypatch.setattr(hostenv.subprocess, "run", Mock(return_value=
+        subprocess.CompletedProcess([], 0, stdout="    nvenc_h264\n", stderr="")))
+    encode = Mock(side_effect=failure) if isinstance(failure, Exception) else Mock(return_value=False)
+    monkeypatch.setattr(hostenv, "_nvenc_can_encode", encode)
+    assert hostenv.detect_speed_encoder() is None
+
+
+@pytest.mark.parametrize("returncode, content, expected", [
+    (0, b"encoded video", True), (1, b"partial", False),
+    (0, None, False), (0, b"", False),
+])
+def test_nvenc_probe_requires_successful_output_and_cleans_up(
+    monkeypatch, returncode, content, expected,
+):
+    paths = []
+
+    def run(args, **kwargs):
+        source = Path(args[args.index("--input") + 1])
+        output = Path(args[args.index("--output") + 1])
+        paths.extend([source, output])
+        assert source.read_bytes().startswith(b"YUV4MPEG2 W128 H128")
+        assert args[args.index("--encoder") + 1] == "nvenc_h264"
+        assert kwargs["timeout"] == 20
+        if content is not None:
+            output.write_bytes(content)
+        return subprocess.CompletedProcess(args, returncode)
+
+    monkeypatch.setattr(hostenv.subprocess, "run", run)
+    assert hostenv._nvenc_can_encode() is expected
+    assert all(not path.parent.exists() for path in paths)
+
+
+def test_macos_stays_quality_only_without_running_probe(monkeypatch):
+    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+    run = Mock(side_effect=AssertionError("macOS must not probe NVENC"))
+    monkeypatch.setattr(hostenv.subprocess, "run", run)
+    assert hostenv.detect_speed_encoder() is None
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("encoder", [None, "nvenc_h264"])
+async def test_initialize_encoders_replaces_previous_capability(monkeypatch, encoder):
+    monkeypatch.setattr(hostenv, "SPEED_ENCODER", "stale")
+    monkeypatch.setattr(hostenv, "detect_speed_encoder", lambda: encoder)
+    await hostenv.initialize_encoders()
+    assert hostenv.SPEED_ENCODER == encoder
+    assert hostenv.speed_mode_available() is (encoder is not None)

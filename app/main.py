@@ -93,6 +93,7 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await hostenv.initialize_encoders()
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     library = Library(LIBRARY_DB)
     library.init_db()

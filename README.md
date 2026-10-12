@@ -4,7 +4,7 @@ A single Docker container that turns an inserted DVD into Plex-ready MP4s with a
 
 - Decrypts CSS with `libdvdcss`
 - Encodes with HandBrake — **Quality mode** (x264 CPU, CRF 20, `slow`) by default,
-  **Speed mode** (NVENC H.264) available as a toggle
+  **Speed mode** (NVENC H.264) available when HandBrake detects usable NVIDIA support
 - Plex-friendly defaults: H.264 MP4 with faststart, AAC stereo + AC3/DTS passthrough,
   decomb deinterlace, auto crop, anamorphic, chapter markers, forced-sub burn-in
 - H.264 (not H.265) for universal Plex direct-play — at DVD resolution HEVC's size
@@ -21,8 +21,9 @@ Two supported hosts. Linux runs in Docker; macOS runs natively (see
 - Linux host (tested on Ubuntu 24.04) with an attached DVD drive at `/dev/sr0`
   (override via the `DVD_DEVICE` env var)
 - Docker + `docker compose`
+- Intel and AMD CPUs work in Quality mode; no GPU or NVIDIA software is required
 - For Speed mode: Nvidia GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-  installed and configured for Docker
+  installed and configured for Docker, plus the NVIDIA override below
 
 **macOS (the native path)**
 
@@ -50,6 +51,27 @@ make down
 ```
 
 Underneath, `make` just wraps `docker compose`; bare `docker compose build` / `up` work too.
+
+The default configuration uses **CPU encoding** and requests no GPU. To enable
+NVIDIA acceleration on Linux, add this to `.env` before starting:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml
+```
+
+Then use the same `make up` / `make up-d` commands. The override exposes the GPU
+and its video driver libraries. For a one-time invocation without changing `.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml make up
+```
+
+At startup, the app asks HandBrake for its available encoders. **Speed** appears
+only when HandBrake reports `nvenc_h264` and successfully encodes a tiny generated
+test clip (no disc needed). Otherwise Quality remains available and the API
+rejects Speed requests. Restart the app after changing GPU access or
+drivers. Intel Quick Sync acceleration is not implemented; Intel users can use
+Quality mode on the CPU.
 
 Open <http://localhost:8000>. The page will scan the disc automatically — if there's no disc
 in the drive, insert one and click **Rescan**.
@@ -215,7 +237,7 @@ settings.conf is never overwritten, since the MakeMKV GUI owns that file too.
 |---|---|---|
 | Runs in | Docker container | Natively (`make native`) |
 | Drive path | `/dev/sr0`, fixed | `/dev/rdiskN`, **auto-detected per scan** via `drutil` |
-| Speed mode | NVENC H.264 | **Unavailable** — the toggle is hidden and the API rejects it |
+| Speed mode | NVENC H.264, if detected (NVIDIA override required in Docker) | **Unavailable** — the toggle is hidden and the API rejects it |
 | cdparanoia | `cdparanoia` | `cd-paranoia` (libcdio) |
 | Rips land in | `${OUTPUT_DIR}` → `/output` | `~/Movies/dvd-rip` |
 | Rip ledger | `./data/library.db` | `~/Library/Application Support/dvd-rip/library.db` |
@@ -348,7 +370,12 @@ fine.
 
 - Confirm `nvidia-container-toolkit` is installed on the host and Docker is configured to
   use it: `docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi`
-- The Speed mode is best-effort. Fall back to Quality mode (CPU x264) if NVENC isn't available.
+- Enable `docker-compose.nvidia.yml` using `COMPOSE_FILE` as shown above. Existing
+  NVIDIA installations must opt in after updating; the default now requests no GPU.
+- Check `docker compose exec dvd-rip HandBrakeCLI --help`: the video encoder list
+  must include `nvenc_h264`. The app checks this and runs a small NVENC test encode
+  at startup, hiding Speed if either check fails or times out. Restart after fixing the
+  driver/container configuration. Quality mode (CPU x264) needs no NVIDIA support.
 
 ### Permissions on the DVD device
 

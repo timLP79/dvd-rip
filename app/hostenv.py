@@ -28,7 +28,9 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -68,13 +70,61 @@ def makemkvcon_bin() -> str:
     return "makemkvcon"
 
 
-#: HandBrake encoder backing "Speed" mode, or None if this host has no hardware
-#: encoder we're willing to use. Apple Silicon has VideoToolbox (`vt_h264`), but
-#: exposing it was declined deliberately: on an M-series CPU, x264 on SD DVD
-#: content already runs many times faster than realtime, so the quality cost of a
-#: hardware encoder buys nothing. None makes Speed mode unavailable rather than
-#: silently downgraded — see `presets.build_handbrake_args`.
-SPEED_ENCODER: Optional[str] = None if IS_MACOS else "nvenc_h264"
+# Resolved once at app startup, never assumed from the OS or CPU architecture.
+# Until detection succeeds, UI, API and argument construction all reject Speed.
+SPEED_ENCODER: Optional[str] = None
+
+
+def detect_speed_encoder() -> Optional[str]:
+    """Enable NVENC only when HandBrake lists it and can encode a tiny clip.
+
+    Help initializes libhb's runtime driver checks, but older versions can list
+    NVENC without a usable encoding device. Verify an actual encode too. Match a
+    complete encoder line so an error mentioning NVENC cannot enable Speed.
+    macOS remains Quality-only; VideoToolbox is deliberately not exposed.
+    """
+    if IS_MACOS:
+        return None
+    try:
+        result = subprocess.run(
+            ["HandBrakeCLI", "--help"], capture_output=True, text=True,
+            errors="replace", timeout=10, check=False,
+        )
+        if result.returncode != 0:
+            log.warning("HandBrake encoder check exited %s; Speed disabled", result.returncode)
+            return None
+        if not any(line.strip() == "nvenc_h264" for line in result.stdout.splitlines()):
+            return None
+        if _nvenc_can_encode():
+            return "nvenc_h264"
+        log.warning("HandBrake NVENC test encode failed; Speed disabled")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Cannot check HandBrake encoders; Speed disabled: %s", exc)
+    return None
+
+
+def _nvenc_can_encode() -> bool:
+    """Encode two synthetic frames, without a disc, media files or ffmpeg CLI."""
+    with tempfile.TemporaryDirectory(prefix="dvd-rip-nvenc-") as directory:
+        source = Path(directory) / "probe.y4m"
+        output = Path(directory) / "probe.mp4"
+        frame = b"FRAME\n" + bytes([16]) * (128 * 128) + bytes([128]) * (128 * 128 // 2)
+        source.write_bytes(b"YUV4MPEG2 W128 H128 F1:1 Ip A1:1 C420jpeg\n" + frame * 2)
+        result = subprocess.run(
+            ["HandBrakeCLI", "--input", str(source), "--output", str(output),
+             "--encoder", "nvenc_h264", "--encoder-preset", "slow", "--quality", "22",
+             "--format", "av_mp4", "--audio", "none", "--min-duration", "0",
+             "--crop", "0:0:0:0"],
+            capture_output=True, timeout=20, check=False,
+        )
+        return result.returncode == 0 and output.is_file() and output.stat().st_size > 0
+
+
+async def initialize_encoders() -> None:
+    """Probe off the event loop; restart the app after hardware/driver changes."""
+    global SPEED_ENCODER
+    SPEED_ENCODER = None
+    SPEED_ENCODER = await asyncio.to_thread(detect_speed_encoder)
 
 
 def speed_mode_available() -> bool:

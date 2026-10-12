@@ -1,0 +1,14 @@
+# Optional NVIDIA support. The base service runs on CPU-only Linux hosts.
+# docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up
+services:
+  dvd-rip:
+    environment:
+      # The CUDA base image defaults to compute,utility; NVENC also needs video.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
