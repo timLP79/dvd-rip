@@ -5,9 +5,11 @@ These are the seams where a wrong value silently misbehaves rather than crashing
 an audio CD look like a DVD), so they get direct coverage.
 """
 
+import asyncio
 import subprocess
+import sys
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -144,6 +146,104 @@ async def test_optical_status_off_macos_reports_nothing(monkeypatch):
     monkeypatch.setattr(hostenv, "IS_MACOS", False)
     status = await hostenv.optical_status()
     assert status.device is None and status.drive_present is False
+
+
+async def test_optical_status_success_does_not_kill_probe(monkeypatch):
+    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+    proc = Mock(returncode=0)
+    proc.communicate = AsyncMock(return_value=(DRUTIL_WITH_DISC.encode(), None))
+    monkeypatch.setattr(hostenv.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
+
+    result = await hostenv.optical_status()
+    assert result.device == "/dev/rdisk4"
+    assert result.drive_present
+    proc.kill.assert_not_called()
+    proc.communicate.assert_awaited_once()
+
+
+async def test_optical_status_missing_command_returns_empty_status(monkeypatch):
+    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+    monkeypatch.setattr(hostenv.asyncio, "create_subprocess_exec",
+                        AsyncMock(side_effect=FileNotFoundError("drutil")))
+    assert await hostenv.optical_status() == hostenv.OpticalStatus()
+
+
+@pytest.mark.parametrize("interrupt", ["timeout", "cancel"])
+async def test_interrupted_optical_probe_stops_real_child(monkeypatch, interrupt):
+    """A real child proves cleanup stops/reaps it; no drive or drutil is used."""
+    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+    monkeypatch.setattr(hostenv, "_DRUTIL_TIMEOUT", 0.05 if interrupt == "timeout" else 10)
+    spawn = asyncio.create_subprocess_exec
+    launched = asyncio.Event()
+    children = []
+
+    async def spawn_probe(*args, **kwargs):
+        assert args == ("drutil", "status")
+        child = await spawn(
+            sys.executable, "-c",
+            "import sys, time; sys.stdout.write('x' * 262144); sys.stdout.flush(); time.sleep(60)",
+            **kwargs,
+        )
+        children.append(child)
+        launched.set()
+        return child
+
+    monkeypatch.setattr(hostenv.asyncio, "create_subprocess_exec", spawn_probe)
+    task = asyncio.create_task(hostenv.optical_status())
+    try:
+        await asyncio.wait_for(launched.wait(), timeout=5)
+        if interrupt == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=5)
+        else:
+            assert await asyncio.wait_for(task, timeout=5) == hostenv.OpticalStatus()
+        # Check before the test's own safety cleanup; the application must reap it.
+        assert children[0].returncode is not None
+        assert children[0].returncode != 0
+        assert children[0].stdout.at_eof()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        for child in children:
+            if child.returncode is None:
+                child.kill()
+            await asyncio.wait_for(child.communicate(), timeout=5)
+
+
+@pytest.mark.parametrize("returncode", [None, 0])
+async def test_optical_probe_exit_race_still_drains_and_reaps(monkeypatch, returncode):
+    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+    proc = Mock(returncode=returncode)
+    proc.kill.side_effect = ProcessLookupError
+    proc.communicate = AsyncMock(side_effect=[asyncio.TimeoutError, (b"", None)])
+    monkeypatch.setattr(hostenv.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
+
+    assert await hostenv.optical_status() == hostenv.OpticalStatus()
+    assert proc.kill.call_count == (1 if returncode is None else 0)
+    assert proc.communicate.await_count == 2
+
+
+async def test_optical_probe_cleanup_has_a_time_limit(monkeypatch, caplog):
+    monkeypatch.setattr(hostenv, "IS_MACOS", True)
+    monkeypatch.setattr(hostenv, "_DRUTIL_CLEANUP_TIMEOUT", 0.01)
+    proc = Mock(returncode=None)
+    calls = 0
+
+    async def communicate():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncio.TimeoutError
+        await asyncio.Event().wait()  # Even a stuck pipe must not hang the request.
+
+    proc.communicate = communicate
+    monkeypatch.setattr(hostenv.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
+    assert await asyncio.wait_for(hostenv.optical_status(), timeout=1) == hostenv.OpticalStatus()
+    proc.kill.assert_called_once()
+    assert calls == 2
+    assert "optical drive probe cleanup failed" in caplog.text
 
 
 def test_discid_device_override_wins(monkeypatch):

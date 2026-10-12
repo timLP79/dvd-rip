@@ -189,6 +189,8 @@ _DRUTIL_NAME_RE = re.compile(r"^\s*Name:\s*(/dev/disk\d+)\s*$", re.MULTILINE)
 _DRUTIL_TYPE_RE = re.compile(r"^\s*Type:\s*(.+?)(?:\s{2,}Name:.*)?$", re.MULTILINE)
 
 _NO_MEDIA = "no media"
+_DRUTIL_TIMEOUT = 10.0
+_DRUTIL_CLEANUP_TIMEOUT = 2.0
 
 
 def parse_drutil_device(stdout: str) -> Optional[str]:
@@ -250,16 +252,36 @@ async def optical_status() -> OpticalStatus:
     """
     if not IS_MACOS:
         return OpticalStatus()
+    proc = None
+    completed = False
     try:
         proc = await asyncio.create_subprocess_exec(
             "drutil", "status",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=_DRUTIL_TIMEOUT)
+        completed = True
     except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
         log.warning("optical drive detection failed: %s", exc)
         return OpticalStatus()
+    finally:
+        if proc is not None and not completed:
+            if proc.returncode is None:
+                # Cancelling communicate (including wait_for's timeout) does
+                # not stop the child. drutil is a read-only probe, so kill it
+                # immediately rather than leave it accessing a stuck drive.
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass  # It exited between the returncode check and kill.
+            # Drain the pipe as well as reaping the child: wait() alone can
+            # deadlock if buffered stdout has paused its transport. Do this
+            # even if returncode is set, since its pipe may still be open.
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=_DRUTIL_CLEANUP_TIMEOUT)
+            except (asyncio.TimeoutError, OSError) as exc:
+                log.warning("optical drive probe cleanup failed: %s", exc)
     text = stdout.decode(errors="replace")
     media = parse_drutil_media(text)
     cooked = parse_drutil_device(text)
