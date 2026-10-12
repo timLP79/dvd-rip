@@ -3,6 +3,8 @@
 A local web UI that turns an inserted DVD into Plex-ready MP4s. Runs in Docker on
 Linux or natively on macOS, with CPU encoding by default.
 
+**Start here:** [Run on a Mac](#run-it-on-macos) · [Run on Linux](#run-it-on-linux)
+
 - Decrypts CSS with `libdvdcss`
 - Encodes with HandBrake — **Quality mode** (x264 CPU, CRF 20, `slow`) by default,
   **Speed mode** (NVENC H.264) available when HandBrake detects usable NVIDIA support
@@ -15,7 +17,7 @@ Linux or natively on macOS, with CPU encoding by default.
 ## Requirements
 
 Two supported hosts. Linux runs in Docker; macOS runs natively (see
-[macOS](#macos-apple-silicon-and-intel) for setup and why Docker can't work there).
+[Mac setup](#run-it-on-macos) for setup and why Docker can't work there).
 
 **Linux (the container path)**
 
@@ -28,10 +30,138 @@ Two supported hosts. Linux runs in Docker; macOS runs natively (see
 
 **macOS (the native path)**
 
-- Apple Silicon or Intel Mac, macOS 11+
+- Apple Silicon or Intel Mac with the required command-line tools; check
+  [Homebrew installation requirements](https://docs.brew.sh/Installation) for your macOS version
 - A USB optical drive (Macs have had no internal one for years)
-- Homebrew, and Python 3.11–3.13 (**not** 3.14 — see [macOS](#macos-apple-silicon))
+- Homebrew, and Python 3.11–3.13 (**not** 3.14 — see [Mac setup](#run-it-on-macos))
 - Quality mode only; there is no NVENC
+
+<a id="macos-apple-silicon"></a>
+
+<a id="macos-apple-silicon-and-intel"></a>
+
+## Run it on macOS
+
+These instructions apply to **Intel and Apple Silicon Macs**. The app runs
+natively using `make native`; no Docker or NVIDIA GPU is needed.
+
+> **Docker cannot work here.** `docker-compose.yml` device-maps the optical drive
+> (`/dev/sr0`, plus its SCSI-generic node for MakeMKV) into the container. On macOS
+> Docker runs inside a Linux VM with no USB or optical passthrough, so that mapping
+> can never resolve — a container would report "no disc" forever. `make up` detects
+> macOS and says so rather than failing obscurely.
+
+### First-time Mac setup
+
+1. Install [Homebrew](https://brew.sh/) if needed, and follow its instructions to
+   add `brew` to your Terminal's PATH. Homebrew also guides you through installing
+   Apple's Command Line Tools, which provide `make` and `git`.
+2. Download or clone the project branch containing these instructions. Open
+   Terminal in the `dvd-rip` folder (the folder containing this README and the
+   `Makefile`). Run the following commands there:
+
+   ```bash
+   # Install the command-line tools and a supported Python version.
+   HOMEBREW_NO_AUTO_UPDATE=1 brew install python@3.13 handbrake libdvdcss lsdvd \
+     flac lame libcdio-paranoia libdiscid
+
+   # Create the app's Python environment and install its dependencies.
+   make venv PYTHON="$(brew --prefix)/bin/python3.13"
+   ```
+
+   The explicit Python path works with either Homebrew installation location and
+   avoids selecting an incompatible system Python. Python 3.11–3.13 is required
+   by the project's pinned dependencies; this example installs
+   [Python 3.13](https://formulae.brew.sh/formula/python@3.13).
+3. Connect your USB optical drive and insert a disc, then check the installation:
+
+   ```bash
+   make doctor
+   ```
+
+   Resolve any required-tool or drive-read errors it reports. For DVD ripping,
+   missing MakeMKV and TMDB keys are optional warnings; you can enter a movie
+   title manually. Blu-ray needs the additional setup below.
+4. Start the app:
+
+   ```bash
+   make native
+   ```
+
+5. Open **<http://localhost:8000>** in your browser. Keep the Terminal window open
+   while the app is running. Choose the title to rip and use **Quality** mode.
+   Completed files go under **`~/Movies/dvd-rip`** by default.
+
+### Starting and stopping on a Mac
+
+For subsequent runs, open Terminal in the project folder and run `make native`.
+Stop with **Ctrl+C** in that Terminal after rips finish. To prevent idle sleep
+while the app runs, launch it with:
+
+```bash
+caffeinate -i make native
+```
+
+DVD ripping needs no `.env` file. For optional metadata lookup or Blu-ray
+settings, create `.env` from `.env.example` if you do not already have one, then
+edit the relevant keys. Keep existing settings when updating the app.
+
+### Mac diagnostics and Blu-ray setup
+
+`make doctor` is the fastest way to diagnose problems here, because almost every
+failure on this platform is silent: a missing `libdvdcss` produces an unreadable
+disc rather than an error, and a wrong libdiscid device makes an audio CD scan as
+a DVD. It reports each dependency, whether a drive and disc are present, and
+whether the raw device is readable.
+
+For Blu-ray, install MakeMKV from <https://www.makemkv.com/download/> — download the
+`.dmg` and drag `MakeMKV.app` to `/Applications` (the Homebrew cask is deprecated
+because it fails macOS Gatekeeper). The app finds `makemkvcon` inside the bundle
+automatically; override with `MAKEMKVCON_BIN`.
+
+Then set `MAKEMKV_APP_KEY` in `.env` (the free beta key, which rotates roughly
+monthly). On its first run `make native` writes `~/Library/MakeMKV/settings.conf`
+with that key and `app_UpdateEnable = "0"` — the update check hangs scans at high
+CPU whenever makemkv.com is unreachable, and it is on by default. An existing
+settings.conf is never overwritten, since the MakeMKV GUI owns that file too.
+
+### What differs from Linux
+
+| | Linux | macOS |
+|---|---|---|
+| Runs in | Docker container | Natively (`make native`) |
+| Drive path | `/dev/sr0`, fixed | `/dev/rdiskN`, **auto-detected per scan** via `drutil` |
+| Speed mode | NVENC H.264, if detected (NVIDIA override required in Docker) | **Unavailable** — the toggle is hidden and the API rejects it |
+| cdparanoia | `cdparanoia` | `cd-paranoia` (libcdio) |
+| Rips land in | `${OUTPUT_DIR}` → `/output` | `~/Movies/dvd-rip` |
+| Rip ledger | `./data/library.db` | `~/Library/Application Support/dvd-rip/library.db` |
+| MakeMKV config | written by the entrypoint | `~/Library/MakeMKV/settings.conf`, written by `make native` |
+
+Verified on macOS against an external USB Pioneer BDR-XD08: **DVD** (scan +
+CSS-decrypted rip) and **Blu-ray** (~16 s to scan 18 titles, then AACS decrypt →
+encode). **Audio CD** has only been exercised negatively — DVDs and Blu-rays are
+correctly *not* routed to the CD scanner — so the libdiscid drive-index path is
+still unconfirmed against a real CD.
+
+**Quality mode on both Intel and Apple Silicon.** The app uses x264 CPU encoding
+on all Macs. VideoToolbox and Intel Quick Sync acceleration are not implemented.
+Encoding speed depends on the CPU and source resolution; the Apple Silicon
+performance observations do not establish performance on an Intel Mac. The
+Speed toggle is hidden, and requesting `speed` through the API returns HTTP 400.
+
+**The drive is detected per scan**, not pinned at startup, so a drive plugged in
+after the app is running is picked up on the next **Rescan** with no restart. Pin
+it with `DVD_DEVICE=/dev/rdisk4` to skip detection.
+
+**Python 3.14 does not work.** The pinned `pydantic-core` publishes no wheels for
+3.14, and on the free-threaded `3.14t` build pip falls back to compiling Rust,
+which fails against PyO3 0.22. The repo pins 3.12.13 via `.tool-versions`, and the
+Makefile picks the newest interpreter that has wheels; override with
+`make native PYTHON=python3.13`.
+
+**Full Disk Access.** macOS may deny raw reads of `/dev/rdiskN` from a sandboxed
+terminal. If `make doctor` reports the device is not readable, grant your terminal
+Full Disk Access in System Settings → Privacy & Security.
 
 ## Run it on Linux
 
@@ -90,7 +220,7 @@ tracked in `dvd-rip-c0b`; Intel Mac hardware validation is also outstanding.
 Open <http://localhost:8000>. The page will scan the disc automatically — if there's no disc
 in the drive, insert one and click **Rescan**.
 
-### Workflow
+## Ripping a disc (Mac or Linux)
 
 1. Insert a DVD
 2. Open the web UI; it auto-scans the disc
@@ -209,81 +339,6 @@ for DVD VOBSUB. Both formats coexist in one Plex library.
 > 1080p discs.
 
 The DVD path is unchanged — no extra config needed for DVD-only use.
-
-<a id="macos-apple-silicon"></a>
-
-## macOS (Apple Silicon and Intel)
-
-On macOS the app runs **natively**, not in Docker.
-
-> **Docker cannot work here.** `docker-compose.yml` device-maps the optical drive
-> (`/dev/sr0`, plus its SCSI-generic node for MakeMKV) into the container. On macOS
-> Docker runs inside a Linux VM with no USB or optical passthrough, so that mapping
-> can never resolve — a container would report "no disc" forever. `make up` detects
-> macOS and says so rather than failing obscurely.
-
-### Setup
-
-```bash
-brew install handbrake libdvdcss lsdvd flac lame libcdio-paranoia libdiscid
-make doctor     # checks tools, drive, encoders, and library loading
-make native     # creates .venv if needed, then serves on http://localhost:8000
-```
-
-`make doctor` is the fastest way to diagnose problems here, because almost every
-failure on this platform is silent: a missing `libdvdcss` produces an unreadable
-disc rather than an error, and a wrong libdiscid device makes an audio CD scan as
-a DVD. It reports each dependency, whether a drive and disc are present, and
-whether the raw device is readable.
-
-For Blu-ray, install MakeMKV from <https://www.makemkv.com/download/> — download the
-`.dmg` and drag `MakeMKV.app` to `/Applications` (the Homebrew cask is deprecated
-because it fails macOS Gatekeeper). The app finds `makemkvcon` inside the bundle
-automatically; override with `MAKEMKVCON_BIN`.
-
-Then set `MAKEMKV_APP_KEY` in `.env` (the free beta key, which rotates roughly
-monthly). On its first run `make native` writes `~/Library/MakeMKV/settings.conf`
-with that key and `app_UpdateEnable = "0"` — the update check hangs scans at high
-CPU whenever makemkv.com is unreachable, and it is on by default. An existing
-settings.conf is never overwritten, since the MakeMKV GUI owns that file too.
-
-### What differs from Linux
-
-| | Linux | macOS |
-|---|---|---|
-| Runs in | Docker container | Natively (`make native`) |
-| Drive path | `/dev/sr0`, fixed | `/dev/rdiskN`, **auto-detected per scan** via `drutil` |
-| Speed mode | NVENC H.264, if detected (NVIDIA override required in Docker) | **Unavailable** — the toggle is hidden and the API rejects it |
-| cdparanoia | `cdparanoia` | `cd-paranoia` (libcdio) |
-| Rips land in | `${OUTPUT_DIR}` → `/output` | `~/Movies/dvd-rip` |
-| Rip ledger | `./data/library.db` | `~/Library/Application Support/dvd-rip/library.db` |
-| MakeMKV config | written by the entrypoint | `~/Library/MakeMKV/settings.conf`, written by `make native` |
-
-Verified on macOS against an external USB Pioneer BDR-XD08: **DVD** (scan +
-CSS-decrypted rip) and **Blu-ray** (~16 s to scan 18 titles, then AACS decrypt →
-encode). **Audio CD** has only been exercised negatively — DVDs and Blu-rays are
-correctly *not* routed to the CD scanner — so the libdiscid drive-index path is
-still unconfirmed against a real CD.
-
-**Quality mode on both Intel and Apple Silicon.** The app uses x264 CPU encoding
-on all Macs. VideoToolbox and Intel Quick Sync acceleration are not implemented.
-Encoding speed depends on the CPU and source resolution; the Apple Silicon
-performance observations do not establish performance on an Intel Mac. The
-Speed toggle is hidden, and requesting `speed` through the API returns HTTP 400.
-
-**The drive is detected per scan**, not pinned at startup, so a drive plugged in
-after the app is running is picked up on the next **Rescan** with no restart. Pin
-it with `DVD_DEVICE=/dev/rdisk4` to skip detection.
-
-**Python 3.14 does not work.** The pinned `pydantic-core` publishes no wheels for
-3.14, and on the free-threaded `3.14t` build pip falls back to compiling Rust,
-which fails against PyO3 0.22. The repo pins 3.12.13 via `.tool-versions`, and the
-Makefile picks the newest interpreter that has wheels; override with
-`make native PYTHON=python3.13`.
-
-**Full Disk Access.** macOS may deny raw reads of `/dev/rdiskN` from a sandboxed
-terminal. If `make doctor` reports the device is not readable, grant your terminal
-Full Disk Access in System Settings → Privacy & Security.
 
 ## Configuration
 
