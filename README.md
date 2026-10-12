@@ -1,6 +1,7 @@
 # DVD Rip
 
-A single Docker container that turns an inserted DVD into Plex-ready MP4s with a local web UI.
+A local web UI that turns an inserted DVD into Plex-ready MP4s. Runs in Docker on
+Linux or natively on macOS, with CPU encoding by default.
 
 - Decrypts CSS with `libdvdcss`
 - Encodes with HandBrake — **Quality mode** (x264 CPU, CRF 20, `slow`) by default,
@@ -9,12 +10,12 @@ A single Docker container that turns an inserted DVD into Plex-ready MP4s with a
   decomb deinterlace, auto crop, anamorphic, chapter markers, forced-sub burn-in
 - H.264 (not H.265) for universal Plex direct-play — at DVD resolution HEVC's size
   win is small, and H.264 8-bit never triggers a server transcode on phones/Chromecasts
-- One job at a time (single drive, single GPU), live progress over Server-Sent Events
+- One job at a time for the optical drive, live progress over Server-Sent Events
 
 ## Requirements
 
 Two supported hosts. Linux runs in Docker; macOS runs natively (see
-[macOS](#macos-apple-silicon) for why Docker can't work there).
+[macOS](#macos-apple-silicon-and-intel) for setup and why Docker can't work there).
 
 **Linux (the container path)**
 
@@ -32,7 +33,7 @@ Two supported hosts. Linux runs in Docker; macOS runs natively (see
 - Homebrew, and Python 3.11–3.13 (**not** 3.14 — see [macOS](#macos-apple-silicon))
 - Quality mode only; there is no NVENC
 
-## Run it
+## Run it on Linux
 
 ```bash
 # See available make targets
@@ -66,12 +67,25 @@ and its video driver libraries. For a one-time invocation without changing `.env
 COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml make up
 ```
 
+To return to CPU-only operation, remove that setting from `.env` and unset it in
+your shell if exported, then run `make up-d` to recreate the container. Wait for
+running and queued rips to finish before recreating it. A plain
+`docker compose restart` does not apply changes to GPU access.
+
 At startup, the app asks HandBrake for its available encoders. **Speed** appears
 only when HandBrake reports `nvenc_h264` and successfully encodes a tiny generated
 test clip (no disc needed). Otherwise Quality remains available and the API
 rejects Speed requests. Restart the app after changing GPU access or
 drivers. Intel Quick Sync acceleration is not implemented; Intel users can use
 Quality mode on the CPU.
+
+The encoder-list check has a 10-second timeout and the test encode has a
+20-second timeout. A failed check disables Speed for that app session; Quality
+remains available. The check runs once at startup, without reading the disc.
+
+CPU-only and optional NVIDIA configurations have regression coverage. A full
+hardware smoke test of these changes on Intel Linux and an NVIDIA host is still
+tracked in `dvd-rip-c0b`; Intel Mac hardware validation is also outstanding.
 
 Open <http://localhost:8000>. The page will scan the disc automatically — if there's no disc
 in the drive, insert one and click **Rescan**.
@@ -88,7 +102,7 @@ in the drive, insert one and click **Rescan**.
 4. Pick which title(s) to rip in the table below
 5. (Optional) expand a title row to choose specific audio tracks / subtitles, or override
    the auto-assigned episode/part number
-6. Choose **Quality** (best compression, slow) or **Speed** (NVENC, faster, slightly larger files)
+6. Use **Quality** (CPU), or choose **Speed** (NVENC) if the host supports it and the option appears
 7. Click **Start Rip** — progress streams live
 8. When done, MP4s land in the Plex-compliant paths described below
 9. Press the drive's physical eject button to swap discs
@@ -196,7 +210,9 @@ for DVD VOBSUB. Both formats coexist in one Plex library.
 
 The DVD path is unchanged — no extra config needed for DVD-only use.
 
-## macOS (Apple Silicon)
+<a id="macos-apple-silicon"></a>
+
+## macOS (Apple Silicon and Intel)
 
 On macOS the app runs **natively**, not in Docker.
 
@@ -249,11 +265,11 @@ encode). **Audio CD** has only been exercised negatively — DVDs and Blu-rays a
 correctly *not* routed to the CD scanner — so the libdiscid drive-index path is
 still unconfirmed against a real CD.
 
-**No Speed mode.** Apple Silicon has no NVENC. VideoToolbox (`vt_h264`) exists but
-is deliberately not wired up: on an M-series CPU, x264 on SD DVD content already
-runs many times faster than realtime, so a hardware encoder would trade quality
-for a speedup you don't need. Requesting `speed` returns HTTP 400 rather than
-silently falling back to x264 — a silent downgrade is indistinguishable from a hang.
+**Quality mode on both Intel and Apple Silicon.** The app uses x264 CPU encoding
+on all Macs. VideoToolbox and Intel Quick Sync acceleration are not implemented.
+Encoding speed depends on the CPU and source resolution; the Apple Silicon
+performance observations do not establish performance on an Intel Mac. The
+Speed toggle is hidden, and requesting `speed` through the API returns HTTP 400.
 
 **The drive is detected per scan**, not pinned at startup, so a drive plugged in
 after the app is running is picked up on the next **Rescan** with no restart. Pin
@@ -273,6 +289,7 @@ Full Disk Access in System Settings → Privacy & Security.
 
 | Env var       | Default       | Notes                                       |
 | ------------- | ------------- | ------------------------------------------- |
+| `COMPOSE_FILE` | _(unset)_ | Linux Docker only: default uses CPU encoding. Set `docker-compose.yml:docker-compose.nvidia.yml` to expose NVIDIA hardware; no effect on `make native` |
 | `DVD_DEVICE`  | `/dev/sr0`    | Path inside the container (mapped via compose). On macOS, unset means auto-detect per scan |
 | `OUTPUT_ROOT` | `/output`     | Where the container writes; mounted as `${OUTPUT_DIR}`. macOS: `~/Movies/dvd-rip` |
 | `PUID`        | `1000`        | UID to run the app as (auto-set by `make` to `id -u`) |

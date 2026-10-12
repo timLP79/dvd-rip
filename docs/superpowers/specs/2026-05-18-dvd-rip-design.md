@@ -1,5 +1,11 @@
 # DVD Rip — Dockerized DVD-to-Plex Pipeline
 
+> Historical design, not current setup instructions. The implementation now uses
+> H.264 (x264 CPU by default, optional NVENC), supports native macOS, and rejects
+> unavailable Speed mode instead of silently falling back. The original GPU
+> reservation below is now an opt-in override. See the [README](../../../README.md)
+> for current requirements and commands.
+
 ## Goal
 
 A single Docker container that, when run on the user's Ubuntu 24.04 desktop, reads the currently-inserted DVD, exposes a local web UI to pick which titles/audio/subtitle tracks to rip, decrypts via `libdvdcss`, encodes with HandBrake to Plex-optimized MP4 files, and writes them to a mounted output directory.

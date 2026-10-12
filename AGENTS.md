@@ -82,3 +82,11 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+## Host and encoder compatibility
+
+- Linux runs in Docker with CPU Quality mode by default; Intel/AMD CPUs need no NVIDIA GPU or host toolkit. The CUDA base image does not make GPU access mandatory.
+- NVIDIA users opt in with `COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml` in `.env`. That override supplies GPU access and the video driver libraries.
+- Intel and Apple Silicon Macs run natively with `make native`, using CPU Quality mode. Quick Sync and VideoToolbox acceleration are not implemented.
+- At startup, `hostenv.initialize_encoders()` checks HandBrake's encoder list and runs a tiny synthetic NVENC encode off the event loop. Timeouts are 10 seconds for the list and 20 seconds for encoding. Failure leaves Speed hidden and rejected by the API and preset builder; there is no silent encoder substitution.
+- GPU/driver changes require app restart or container recreation after queued/running jobs finish. Keep detection in `hostenv.py`; preserve CPU Quality and optional NVENC behavior. Run `tests/test_hostenv.py`, `tests/test_api.py`, `tests/test_presets.py`, and `tests/test_compose.py` for changes here. Do not describe mocked tests as hardware validation; the Linux hardware follow-up is `dvd-rip-c0b`.
