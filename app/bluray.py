@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import hostenv
 from .dvd import classify_aspect
 from .models import AudioTrack, ScanResult, SubtitleTrack, Title
 
@@ -188,12 +189,13 @@ async def _spawn(cmd: list[str], timeout: float = _INFO_TIMEOUT, *, register_pro
 
 async def detect_and_scan(device: str, *, _run: Callable = _spawn, register_proc=None) -> Optional[ScanResult]:
     """Run `makemkvcon info`; return a Blu-ray ScanResult, or None to fall back to DVD."""
-    cmd = ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"]
+    cmd = [hostenv.makemkvcon_bin(), "-r", "--cache=1", "info", hostenv.makemkv_source(device)]
     kwargs = {} if register_proc is None else {"register_proc": register_proc}
     try:
         rc, out, err = await _run(cmd, timeout=_INFO_TIMEOUT, **kwargs)
     except FileNotFoundError:
-        log.error("makemkvcon not found on PATH")
+        log.error("makemkvcon not found at %r — install MakeMKV, or set MAKEMKVCON_BIN",
+                  cmd[0])
         return None
     except asyncio.TimeoutError:
         log.error("makemkvcon info timed out for %s", device)
@@ -227,8 +229,8 @@ async def decrypt_title(
     Raises RuntimeError on failure (with a tail of makemkvcon output).
     """
     Path(scratch_dir).mkdir(parents=True, exist_ok=True)
-    cmd = ["makemkvcon", "-r", "--cache=1", "--progress=-same",
-           "mkv", f"dev:{device}", str(title_id), scratch_dir]
+    cmd = [hostenv.makemkvcon_bin(), "-r", "--cache=1", "--progress=-same",
+           "mkv", hostenv.makemkv_source(device), str(title_id), scratch_dir]
     log.info("decrypt_title: %s", shlex.join(cmd))
     started = time.time()
     before = set(Path(scratch_dir).glob("*.mkv"))

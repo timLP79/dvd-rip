@@ -1,6 +1,6 @@
 import pytest
 
-from app import cd
+from app import cd, hostenv
 from app.cd import CDDiscInfo
 from app.models import CDTrack, MBRelease
 
@@ -159,7 +159,7 @@ def _spawn_factory(recorder):
     """Fake spawn: records the argv, fabricates the file the tool would write."""
     async def fake_spawn(cmd, *, register_proc=None):
         recorder.append(cmd)
-        if cmd[0] == "cdparanoia":
+        if cmd[0] == hostenv.CDPARANOIA_BIN:
             _fake_wav(Path(_out_path(cmd)))     # valid WAV so the real join works
         else:                                    # flac/lame -> create the output file
             Path(_out_path(cmd)).write_bytes(b"encoded")
@@ -194,7 +194,7 @@ async def test_rip_disc_audiobook_split_one_file_per_track(tmp_path):
     assert (tmp_path / "Audiobooks" / "Neil Gaiman" / "Fragile Things"
             / "1-01 - The Mapmaker.mp3").exists()
     # per-track lame, NOT a whole-disc join
-    assert [c[0] for c in cmds] == ["cdparanoia", "lame", "cdparanoia", "lame"]
+    assert [c[0] for c in cmds] == [hostenv.CDPARANOIA_BIN, "lame", hostenv.CDPARANOIA_BIN, "lame"]
     assert not list((tmp_path / "scratch").glob("*.wav"))
 
 
@@ -202,7 +202,7 @@ async def test_rip_disc_audiobook_split_one_file_per_track(tmp_path):
 async def test_rip_disc_audiobook_split_removes_written_on_failure(tmp_path):
     calls = {"n": 0}
     async def flaky_spawn(cmd, *, register_proc=None):
-        if cmd[0] == "cdparanoia":
+        if cmd[0] == hostenv.CDPARANOIA_BIN:
             _fake_wav(Path(_out_path(cmd)))
             return 0, ""
         calls["n"] += 1
@@ -281,7 +281,7 @@ async def test_rip_disc_music_writes_one_file_per_track(tmp_path):
     assert len(written) == 2                                   # track 3 excluded
     assert (tmp_path / "Music" / "Radiohead" / "OK Computer" / "01 - Airbag.flac").exists()
     assert not list((tmp_path / "scratch").glob("*.wav"))      # wavs cleaned up
-    assert [c[0] for c in cmds] == ["cdparanoia", "flac", "cdparanoia", "flac"]
+    assert [c[0] for c in cmds] == [hostenv.CDPARANOIA_BIN, "flac", hostenv.CDPARANOIA_BIN, "flac"]
 
 
 @pytest.mark.asyncio
@@ -298,7 +298,7 @@ async def test_rip_disc_audiobook_joins_to_one_file(tmp_path):
     assert written[0].name == "Fragile Things, Disc 05.mp3"
     assert written[0].exists()
     # 4 cdparanoia extracts + exactly one lame encode
-    assert [c[0] for c in cmds].count("cdparanoia") == 4
+    assert [c[0] for c in cmds].count(hostenv.CDPARANOIA_BIN) == 4
     assert [c[0] for c in cmds].count("lame") == 1
     assert progress[-1] == 100
     assert not list((tmp_path / "scratch").glob("*.wav"))
@@ -308,7 +308,7 @@ async def test_rip_disc_audiobook_joins_to_one_file(tmp_path):
 async def test_rip_disc_removes_written_files_on_failure(tmp_path):
     calls = {"n": 0}
     async def flaky_spawn(cmd, *, register_proc=None):
-        if cmd[0] == "cdparanoia":
+        if cmd[0] == hostenv.CDPARANOIA_BIN:
             _fake_wav(Path(_out_path(cmd)))
             return 0, ""
         calls["n"] += 1

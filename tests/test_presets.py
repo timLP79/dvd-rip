@@ -1,3 +1,6 @@
+import pytest
+
+from app import hostenv
 from app.models import EncoderMode
 from app.presets import build_handbrake_args
 
@@ -61,13 +64,33 @@ def test_quality_mode_uses_x264():
     assert pairs["--audio-fallback"] == "ac3"
 
 
-def test_speed_mode_uses_nvenc():
+def test_speed_mode_uses_nvenc(monkeypatch):
+    # Pinned rather than read from the host: the suite must assert the same thing
+    # on the Linux rip box and on a dev Mac, which has no NVENC.
+    monkeypatch.setattr(hostenv, "SPEED_ENCODER", "nvenc_h264")
     args = _build(encoder_mode=EncoderMode.SPEED)
     pairs = _args_to_pairs(args)
     assert pairs["--encoder"] == "nvenc_h264"
     assert pairs["--quality"] == "22"
     assert pairs["--encoder-preset"] == "slow"
     assert "--encoder-tune" not in pairs
+
+
+def test_speed_mode_rejected_when_host_has_no_hardware_encoder(monkeypatch):
+    """No NVENC (macOS) -> raise, never silently fall back to x264.
+
+    A silent downgrade would hand the user a slow CPU rip they didn't ask for,
+    indistinguishable from a hang.
+    """
+    monkeypatch.setattr(hostenv, "SPEED_ENCODER", None)
+    with pytest.raises(ValueError, match="Speed mode is unavailable"):
+        _build(encoder_mode=EncoderMode.SPEED)
+
+
+def test_quality_mode_unaffected_by_missing_hardware_encoder(monkeypatch):
+    monkeypatch.setattr(hostenv, "SPEED_ENCODER", None)
+    pairs = _args_to_pairs(_build(encoder_mode=EncoderMode.QUALITY))
+    assert pairs["--encoder"] == "x264"
 
 
 def test_burn_forced_with_no_soft_tracks():

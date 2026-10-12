@@ -53,7 +53,11 @@ bd close <id>         # Complete work
 ## Build & Test
 
 ```bash
-# Container (production path)
+# macOS (native — the ONLY working path there; Docker cannot see an optical drive)
+make doctor           # check toolchain, drive, encoders, library loading
+make native           # create .venv if needed, then serve on :8000
+
+# Container (production path — Linux only)
 make build            # build the Docker image (~5–10 min first time)
 make up-d             # start detached
 make logs             # tail container logs
@@ -79,8 +83,8 @@ container's worker dies with the container and leaves a partial MP4. The Makefil
 
 ## Architecture Overview
 
-Single Docker container running a FastAPI + vanilla-JS web UI that orchestrates
-HandBrakeCLI. One drive, one GPU, one concurrent rip.
+FastAPI + vanilla-JS web UI that orchestrates HandBrakeCLI. Runs in one Docker
+container on Linux or natively on macOS. One drive, one concurrent rip; GPU optional.
 
 ```
 Browser (HTML/CSS/vanilla JS, SSE) ─HTTP─▶ FastAPI / Uvicorn ──▶ Ripper worker
@@ -93,6 +97,7 @@ Module map (all in `app/`):
 
 | File | Responsibility |
 |---|---|
+| `hostenv.py` | The one seam for host-OS differences — optical-device detection/naming (macOS has no stable path, and libdiscid names drives differently from everything else), tool binary names (`cd-paranoia` vs `cdparanoia`, `makemkvcon` inside an .app), storage defaults, and whether a Speed-mode hardware encoder exists. Anything platform-conditional belongs here, not scattered across modules |
 | `main.py` | FastAPI routes (`/api/scan` routes CD→DVD→Blu-ray, `/api/scan/cancel`, `/api/search`, `/api/rip`, `/api/cd/rip`, `/api/jobs`, `/api/jobs/{id}/progress` SSE), lifespan, template rendering |
 | `dvd.py` | `HandBrakeCLI --json --scan` + `lsdvd` parsing into `ScanResult`; `is_dvd_video()` fast lsdvd probe so DVDs skip makemkvcon |
 | `bluray.py` | MakeMKV front-end — detect BD, scan titles, decrypt a title to a temp MKV (the only module that touches `makemkvcon`) |
@@ -118,12 +123,35 @@ Container plumbing (`Dockerfile`, `docker-compose.yml`, `scripts/entrypoint.sh`)
 
 ## Conventions & Patterns
 
-- **Subprocesses** are launched with asyncio's argv-based spawner (never shell strings) — no command-injection surface even with user-provided titles/years.
+- **Subprocesses** use argv lists, never shell strings. Rip/scan workers use asyncio; the bounded startup encoder probe uses `subprocess.run` off the event loop.
 - **HandBrake progress** is parsed from raw byte chunks split on `\r` or `\n` (HandBrake uses CR to overwrite progress lines; line-based reads would block forever).
-- **One job at a time** — there's only one optical drive and one GPU, so parallel rips just thrash both.
+- **One job at a time** — the worker serializes access to the optical drive and encoding resources, including on CPU-only hosts.
 - **Output cleanup** — non-zero exit from HandBrake means no `moov` atom → unplayable file. The ripper unlinks the partial unconditionally on cancel/fail.
 - **No build step on the frontend** — just `<link>`/`<script>` tags. `?v=<token>` query strings (per-container-start hex) bust the browser cache after rebuilds so stale JS never collides with new HTML.
 - **Plex naming** matches the user's existing library convention exactly: TV shows omit the year (`TV Shows/Deadwood/Season 01/Deadwood S01E01.mp4`), movies use `Movies/Title (Year)/Title (Year).mp4` with `- cd2` etc. for multi-part. Sanitization strips OS-illegal chars but keeps spaces and `!`.
 - **CD ripping** — audio CDs are Red Book (no filesystem); a CD track is never a chapter. Audiobook = **one joined MP3 per disc** by default (a 96-track seek-index disc must never become 96 files), with an optional **split-by-MusicBrainz** mode (per-title MP3s) when the exact disc-ID hit carries titles. MusicBrainz is **exact disc-ID only** (fuzzy TOC returns false positives — bird-song CDs, jingle libraries). Full design + field evaluation: `docs/superpowers/specs/2026-07-04-cd-rip-design.md`.
 - **Tests** never depend on a real optical drive — DVD uses recorded `tests/fixtures/scan_*.txt`; CD injects fake disc readers + subprocess spawners (no `cdparanoia`/`libdiscid`/`flac`/`lame` needed); `respx` mocks TMDB **and** MusicBrainz HTTP.
+- **Two hosts, one codebase.** Linux runs the container (production); macOS runs
+  natively via `make native` because Docker's Linux VM on macOS has no optical/USB
+  passthrough — the compose `devices:` mapping can never resolve, so a container
+  would report "no disc" forever. Keep every platform difference inside `hostenv.py`;
+  preserve CPU Quality mode and optional NVIDIA support on Linux.
+- **The optical device is resolved per scan/job on macOS**, not pinned at startup, so
+  a drive plugged in later works without a restart. Three consumers want three
+  different names for the same drive: HandBrake/lsdvd/MakeMKV take `/dev/rdiskN`,
+  libdiscid takes a drive *index*, cdparanoia takes the raw path.
+- **No silent encoder substitution.** If startup cannot verify usable NVENC,
+  Speed mode is hidden in the UI and rejected with HTTP 400. Quality remains x264.
+- **Python 3.11–3.13 only.** The pinned pydantic-core has no 3.14 wheels and fails to
+  compile on free-threaded 3.14t. Pinned via `.tool-versions`; the Makefile also picks
+  a working interpreter. Test deps live in `requirements-dev.txt` (`pytest-asyncio` is
+  mandatory — pytest.ini sets `asyncio_mode=auto`).
 - **Secrets** (just `TMDB_API_KEY` today) live in `.env`, which is gitignored. `.env.example` is the template.
+
+## Host and encoder compatibility
+
+- Linux runs in Docker with CPU Quality mode by default; Intel/AMD CPUs need no NVIDIA GPU or host toolkit. The CUDA base image does not make GPU access mandatory.
+- NVIDIA users opt in with `COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml` in `.env`. That override supplies GPU access and the video driver libraries.
+- Intel and Apple Silicon Macs run natively with `make native`, using CPU Quality mode. Quick Sync and VideoToolbox acceleration are not implemented.
+- At startup, `hostenv.initialize_encoders()` checks HandBrake's encoder list and runs a tiny synthetic NVENC encode off the event loop. Timeouts are 10 seconds for the list and 20 seconds for encoding. Failure leaves Speed hidden and rejected by the API and preset builder; there is no silent encoder substitution.
+- GPU/driver changes require app restart or container recreation after queued/running jobs finish. Keep detection in `hostenv.py`; preserve CPU Quality and optional NVENC behavior. Run `tests/test_hostenv.py`, `tests/test_api.py`, `tests/test_presets.py`, and `tests/test_compose.py` for changes here. Do not describe mocked tests as hardware validation; the Linux hardware follow-up is `dvd-rip-c0b`.

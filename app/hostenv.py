@@ -1,0 +1,393 @@
+"""Host-OS differences in one place: device naming, tool names, storage defaults.
+
+This project was built for a Linux host where the optical drive is `/dev/sr0`, the
+GPU is Nvidia, and everything runs in a container with `/output` and `/data`
+bind-mounted. On macOS none of that holds:
+
+- **Docker can't help.** Its Linux VM has no optical/USB passthrough, so the
+  `devices:` mapping in docker-compose.yml can never see a drive. On macOS the app
+  runs natively against Homebrew tools instead.
+- **The drive has no stable path.** It enumerates as `/dev/diskN`, and N shifts with
+  whatever else is attached, so it must be detected per scan rather than hardcoded —
+  that also lets a drive plugged in *after* startup work without a restart.
+- **Every consumer wants a different name for the same drive:**
+  HandBrake/lsdvd/MakeMKV take the raw device path (`/dev/rdiskN`), while libdiscid
+  takes an opaque OS-defined id which on macOS is a drive *index* (`"1"`), not a path.
+  Passing a `/dev/...` path to libdiscid on macOS just fails.
+- **Homebrew has no `cdparanoia`** — libcdio ships the same tool as `cd-paranoia`.
+- **There is no NVENC**, so Speed mode has no encoder at all (see `SPEED_ENCODER`).
+
+Every value here is overridable by the env var named in its docstring, so anything
+auto-detection gets wrong can be pinned by hand.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+IS_MACOS = sys.platform == "darwin"
+
+# Fallback when detection finds nothing and no override is set. On Linux this is
+# simply correct; on macOS it is a placeholder that produces a clear "no drive"
+# scan failure rather than a confusing one.
+_LINUX_DEFAULT_DEVICE = "/dev/sr0"
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+
+#: cdparanoia's binary name. Homebrew ships libcdio's build as `cd-paranoia`;
+#: the CLI flags this project uses (`-d <dev> <track> <out.wav>`) are identical.
+CDPARANOIA_BIN = os.getenv("CDPARANOIA_BIN") or ("cd-paranoia" if IS_MACOS else "cdparanoia")
+
+# MakeMKV on macOS installs an .app bundle and puts nothing on PATH.
+_MACOS_MAKEMKVCON = "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+
+
+def makemkvcon_bin() -> str:
+    """Path to `makemkvcon`. Override with `MAKEMKVCON_BIN`.
+
+    Resolved per call rather than at import so installing MakeMKV doesn't require
+    restarting the app.
+    """
+    override = os.getenv("MAKEMKVCON_BIN")
+    if override:
+        return override
+    if IS_MACOS and not shutil.which("makemkvcon") and os.path.exists(_MACOS_MAKEMKVCON):
+        return _MACOS_MAKEMKVCON
+    return "makemkvcon"
+
+
+# Resolved once at app startup, never assumed from the OS or CPU architecture.
+# Until detection succeeds, UI, API and argument construction all reject Speed.
+SPEED_ENCODER: Optional[str] = None
+
+
+def detect_speed_encoder() -> Optional[str]:
+    """Enable NVENC only when HandBrake lists it and can encode a tiny clip.
+
+    Help initializes libhb's runtime driver checks, but older versions can list
+    NVENC without a usable encoding device. Verify an actual encode too. Match a
+    complete encoder line so an error mentioning NVENC cannot enable Speed.
+    macOS remains Quality-only; VideoToolbox is deliberately not exposed.
+    """
+    if IS_MACOS:
+        return None
+    try:
+        result = subprocess.run(
+            ["HandBrakeCLI", "--help"], capture_output=True, text=True,
+            errors="replace", timeout=10, check=False,
+        )
+        if result.returncode != 0:
+            log.warning("HandBrake encoder check exited %s; Speed disabled", result.returncode)
+            return None
+        if not any(line.strip() == "nvenc_h264" for line in result.stdout.splitlines()):
+            return None
+        if _nvenc_can_encode():
+            return "nvenc_h264"
+        log.warning("HandBrake NVENC test encode failed; Speed disabled")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Cannot check HandBrake encoders; Speed disabled: %s", exc)
+    return None
+
+
+def _nvenc_can_encode() -> bool:
+    """Encode two synthetic frames, without a disc, media files or ffmpeg CLI."""
+    with tempfile.TemporaryDirectory(prefix="dvd-rip-nvenc-") as directory:
+        source = Path(directory) / "probe.y4m"
+        output = Path(directory) / "probe.mp4"
+        frame = b"FRAME\n" + bytes([16]) * (128 * 128) + bytes([128]) * (128 * 128 // 2)
+        source.write_bytes(b"YUV4MPEG2 W128 H128 F1:1 Ip A1:1 C420jpeg\n" + frame * 2)
+        result = subprocess.run(
+            ["HandBrakeCLI", "--input", str(source), "--output", str(output),
+             "--encoder", "nvenc_h264", "--encoder-preset", "slow", "--quality", "22",
+             "--format", "av_mp4", "--audio", "none", "--min-duration", "0",
+             "--crop", "0:0:0:0"],
+            capture_output=True, timeout=20, check=False,
+        )
+        return result.returncode == 0 and output.is_file() and output.stat().st_size > 0
+
+
+async def initialize_encoders() -> None:
+    """Probe off the event loop; restart the app after hardware/driver changes."""
+    global SPEED_ENCODER
+    SPEED_ENCODER = None
+    SPEED_ENCODER = await asyncio.to_thread(detect_speed_encoder)
+
+
+def speed_mode_available() -> bool:
+    """True if this host can serve an EncoderMode.SPEED rip."""
+    return SPEED_ENCODER is not None
+
+
+# ---------------------------------------------------------------------------
+# Storage defaults
+# ---------------------------------------------------------------------------
+# The container defaults (/output, /data) are bind-mount targets that don't exist
+# on a Mac. Natively we use the platform's conventional locations; the rip ledger
+# and scratch stay OUT of the media tree so Plex never scans them.
+
+def default_output_root() -> str:
+    """Where finished rips go. Override with `OUTPUT_ROOT`."""
+    if IS_MACOS:
+        return str(Path.home() / "Movies" / "dvd-rip")
+    return "/output"
+
+
+def default_library_db() -> str:
+    """SQLite rip ledger. Override with `LIBRARY_DB`."""
+    if IS_MACOS:
+        return str(Path.home() / "Library" / "Application Support" / "dvd-rip" / "library.db")
+    return "/data/library.db"
+
+
+def default_scratch_dir() -> str:
+    """Transient MKV/WAV scratch. Override with `MAKEMKV_SCRATCH`.
+
+    Needs ~40 GB free during a Blu-ray rip.
+    """
+    if IS_MACOS:
+        return str(Path.home() / "Library" / "Application Support" / "dvd-rip" / "scratch")
+    return "/data/scratch"
+
+
+# ---------------------------------------------------------------------------
+# Optical device
+# ---------------------------------------------------------------------------
+
+# `drutil status` prints a block per drive. With a disc loaded:
+#
+#      Vendor   Product           Rev
+#      PIONEER  BD-RW   BDR-XD08  1.00
+#
+#                Type: DVD-ROM               Name: /dev/disk4
+#
+# With the tray empty it stops after the Type, and there is NO Name field:
+#
+#                Type: No Media Inserted
+#
+# macOS only creates the /dev/diskN node once media is loaded, so an empty tray
+# genuinely has no device to find. With no drive attached at all, `drutil status`
+# prints nothing whatsoever — which is why drive presence is tracked separately
+# from the device path: "no drive" and "no disc" need different advice.
+_DRUTIL_NAME_RE = re.compile(r"^\s*Name:\s*(/dev/disk\d+)\s*$", re.MULTILINE)
+
+# The Type value runs to end-of-line, except when the Name field shares the line
+# (drutil pads the columns with runs of spaces).
+_DRUTIL_TYPE_RE = re.compile(r"^\s*Type:\s*(.+?)(?:\s{2,}Name:.*)?$", re.MULTILINE)
+
+_NO_MEDIA = "no media"
+_DRUTIL_TIMEOUT = 10.0
+_DRUTIL_CLEANUP_TIMEOUT = 2.0
+
+
+def parse_drutil_device(stdout: str) -> Optional[str]:
+    """Extract the optical drive's device path from `drutil status` output.
+
+    Returns the *cooked* path (`/dev/disk4`); callers convert to raw. None when no
+    optical drive is attached — `drutil status` prints nothing at all in that case.
+    """
+    match = _DRUTIL_NAME_RE.search(stdout)
+    if not match:
+        # Fall back to a looser match: the field is printed on a shared line with
+        # Type:, and drutil's column padding has changed across macOS releases.
+        loose = re.search(r"Name:\s*(/dev/disk\d+)", stdout)
+        return loose.group(1) if loose else None
+    return match.group(1)
+
+
+def raw_device(device: str) -> str:
+    """Map a cooked BSD disk path to its raw character device.
+
+    `/dev/disk4` -> `/dev/rdisk4`. The raw node is what HandBrake, lsdvd and
+    MakeMKV want: reads bypass the buffer cache, which matters for a 4 GB+ linear
+    read off optical media. Anything that isn't a `/dev/diskN` path is returned
+    unchanged, so an explicit override is never rewritten.
+    """
+    if device.startswith("/dev/disk"):
+        return "/dev/r" + device[len("/dev/"):]
+    return device
+
+
+def parse_drutil_media(stdout: str) -> Optional[str]:
+    """The disc type `drutil status` reports, e.g. "DVD-ROM" or "No Media Inserted".
+
+    None when the output has no Type field at all (no drive attached).
+    """
+    match = _DRUTIL_TYPE_RE.search(stdout)
+    return match.group(1).strip() if match else None
+
+
+@dataclass(frozen=True)
+class OpticalStatus:
+    """What the host can currently see of the optical drive."""
+
+    device: Optional[str] = None       # raw path; None until media is loaded
+    drive_present: bool = False
+    media: Optional[str] = None        # drutil's disc type, if it reported one
+
+    @property
+    def has_media(self) -> bool:
+        return self.device is not None
+
+
+async def optical_status() -> OpticalStatus:
+    """Probe the optical drive on macOS. Off macOS, reports nothing found.
+
+    Distinguishes "no drive" from "drive present, tray empty": the first needs
+    hardware plugged in, the second just needs a disc, and reporting them
+    identically sends people hunting for the wrong problem.
+    """
+    if not IS_MACOS:
+        return OpticalStatus()
+    proc = None
+    completed = False
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "drutil", "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=_DRUTIL_TIMEOUT)
+        completed = True
+    except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
+        log.warning("optical drive detection failed: %s", exc)
+        return OpticalStatus()
+    finally:
+        if proc is not None and not completed:
+            if proc.returncode is None:
+                # Cancelling communicate (including wait_for's timeout) does
+                # not stop the child. drutil is a read-only probe, so kill it
+                # immediately rather than leave it accessing a stuck drive.
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass  # It exited between the returncode check and kill.
+            # Drain the pipe as well as reaping the child: wait() alone can
+            # deadlock if buffered stdout has paused its transport. Do this
+            # even if returncode is set, since its pipe may still be open.
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=_DRUTIL_CLEANUP_TIMEOUT)
+            except (asyncio.TimeoutError, OSError) as exc:
+                log.warning("optical drive probe cleanup failed: %s", exc)
+    text = stdout.decode(errors="replace")
+    media = parse_drutil_media(text)
+    cooked = parse_drutil_device(text)
+    return OpticalStatus(
+        device=raw_device(cooked) if cooked else None,
+        # `drutil status` prints nothing at all with no drive attached, so any
+        # Type line means a drive answered.
+        drive_present=media is not None,
+        media=media,
+    )
+
+
+async def detect_optical_device() -> Optional[str]:
+    """The optical device path, or None if no drive or no disc.
+
+    Returns a raw device path (`/dev/rdisk4`). Linux always returns None — there
+    the device is a fixed, configured path, not something to go hunting for.
+    """
+    return (await optical_status()).device
+
+
+async def resolve_optical_device() -> str:
+    """The device path to hand HandBrake / lsdvd / MakeMKV for this scan or rip.
+
+    Resolution order:
+      1. `DVD_DEVICE` env var — an explicit override is never second-guessed.
+      2. macOS: live detection via `drutil`, so a drive plugged in after startup
+         is picked up on the next scan with no restart.
+      3. The Linux default, `/dev/sr0`.
+    """
+    override = os.getenv("DVD_DEVICE")
+    if override:
+        return override
+    detected = await detect_optical_device()
+    return detected or _LINUX_DEFAULT_DEVICE
+
+
+async def device_label() -> str:
+    """The device string to show in the UI header.
+
+    `resolve_optical_device` must always return something runnable, so with no
+    drive attached it falls back to the Linux default — and printing "/dev/sr0"
+    in the header of a Mac is just misleading. Report the absence instead.
+    """
+    override = os.getenv("DVD_DEVICE")
+    if override:
+        return override
+    if not IS_MACOS:
+        return _LINUX_DEFAULT_DEVICE
+    status = await optical_status()
+    if status.device:
+        return status.device
+    if status.drive_present:
+        # macOS creates no /dev node until media is loaded, so this is normal —
+        # say "insert a disc", not "no drive".
+        return "drive ready — no disc"
+    return "no drive detected"
+
+
+def discid_device(device: str) -> str:
+    """Translate an optical device path into what libdiscid expects.
+
+    libdiscid's device id is explicitly OS-defined (see `discid_get_default_device`
+    in discid.h). On Linux it's the same `/dev/sr0` path everything else uses; on
+    macOS it's a drive *index* string (`"1"`), and handing it a `/dev/...` path
+    makes `discid.read()` fail — which this app would misread as "not an audio CD"
+    and quietly fall through to the DVD scanner.
+
+    Override with `DISCID_DEVICE`.
+    """
+    override = os.getenv("DISCID_DEVICE")
+    if override:
+        return override
+    if not IS_MACOS:
+        return device
+    try:
+        import discid  # lazily imported so tests never need libdiscid installed
+        return discid.get_default_device()
+    except Exception as exc:  # pragma: no cover - depends on host libdiscid
+        log.warning("libdiscid default device lookup failed (%s); falling back to '1'", exc)
+        return "1"
+
+
+def makemkv_source(device: str) -> str:
+    """The disc argument for `makemkvcon` (`dev:/dev/rdisk4`, `disc:0`, ...).
+
+    Override with `MAKEMKV_SOURCE`. MakeMKV's drive addressing differs between
+    platforms and builds; if `dev:<path>` isn't recognised on your host, run
+    `makemkvcon -r info disc:9999` to list drives and set MAKEMKV_SOURCE to the
+    matching `disc:N`.
+    """
+    override = os.getenv("MAKEMKV_SOURCE")
+    if override:
+        return override
+    return f"dev:{device}"
+
+
+def describe() -> dict[str, object]:
+    """Snapshot of the resolved host configuration, for logging and diagnostics."""
+    return {
+        "platform": sys.platform,
+        "cdparanoia": CDPARANOIA_BIN,
+        "makemkvcon": makemkvcon_bin(),
+        "speed_encoder": SPEED_ENCODER,
+        "output_root": os.getenv("OUTPUT_ROOT", default_output_root()),
+        "library_db": os.getenv("LIBRARY_DB", default_library_db()),
+        "scratch_dir": os.getenv("MAKEMKV_SCRATCH", default_scratch_dir()),
+        "dvd_device_override": os.getenv("DVD_DEVICE") or None,
+    }

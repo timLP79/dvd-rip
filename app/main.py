@@ -17,13 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
-from . import cd
+from . import cd, hostenv
 from .bluray import detect_and_scan as bluray_detect_and_scan
 from .dvd import is_dvd_video, scan
 from .library import Library
 from .models import (
     ContentType,
     CDRipRequest,
+    EncoderMode,
     Job,
     PushSubscription,
     PushUnsubscribe,
@@ -45,10 +46,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-DVD_DEVICE = os.getenv("DVD_DEVICE", "/dev/sr0")
-OUTPUT_ROOT = Path(os.getenv("OUTPUT_ROOT", "/output"))
-LIBRARY_DB = os.getenv("LIBRARY_DB", "/data/library.db")
-MAKEMKV_SCRATCH = os.getenv("MAKEMKV_SCRATCH", "/data/scratch")
+# Storage defaults differ per host: the container's /output and /data are bind-mount
+# targets that don't exist when running natively on macOS. See hostenv.
+OUTPUT_ROOT = Path(os.getenv("OUTPUT_ROOT", hostenv.default_output_root()))
+LIBRARY_DB = os.getenv("LIBRARY_DB", hostenv.default_library_db())
+MAKEMKV_SCRATCH = os.getenv("MAKEMKV_SCRATCH", hostenv.default_scratch_dir())
 
 # Per-process token appended to static asset URLs so each container start busts
 # any browser cache. New container → new token → forced refetch of JS/CSS.
@@ -91,6 +93,7 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await hostenv.initialize_encoders()
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     library = Library(LIBRARY_DB)
     library.init_db()
@@ -99,8 +102,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         logging.getLogger(__name__).exception("library backfill failed")
     push = PushSender(library)
-    ripper = Ripper(device=DVD_DEVICE, output_root=OUTPUT_ROOT, library=library,
-                    scratch_dir=MAKEMKV_SCRATCH, push=push)
+    logging.getLogger(__name__).info("host configuration: %s", hostenv.describe())
+    ripper = Ripper(device=await hostenv.resolve_optical_device(),
+                    output_root=OUTPUT_ROOT, library=library,
+                    scratch_dir=MAKEMKV_SCRATCH, push=push,
+                    device_provider=hostenv.resolve_optical_device)
     await ripper.start()
     tmdb = TMDBClient()
     musicbrainz = MusicBrainzClient()
@@ -173,9 +179,12 @@ async def index(request: Request) -> HTMLResponse:
         request,
         "index.html",
         {
-            "device": DVD_DEVICE,
+            # Resolved per request, not cached at startup: on macOS the drive is
+            # detected live, so the header reflects a drive plugged in just now.
+            "device": await hostenv.device_label(),
             "output_root": str(OUTPUT_ROOT),
             "tmdb_enabled": tmdb.enabled,
+            "speed_available": hostenv.speed_mode_available(),
             "asset_version": ASSET_VERSION,
         },
     )
@@ -204,22 +213,29 @@ async def api_scan(request: Request) -> ScanResult:
     coordinator: ScanCoordinator = request.app.state.scan_coordinator
 
     async def _probe(register_proc) -> ScanResult:
+        # Resolved once per scan so every probe below addresses the same drive,
+        # and so a drive attached since the last scan is picked up (macOS).
+        device = await hostenv.resolve_optical_device()
+        # libdiscid names drives by an OS-defined id, which on macOS is a drive
+        # index rather than a path — translate, or read() fails and the disc gets
+        # misclassified as "not an audio CD" and falls through to the DVD scanner.
+        cd_device = hostenv.discid_device(device)
         # Audio CD is the cheapest, most specific probe (libdiscid, ~1s); it is
         # an in-process call, so it is not subprocess-cancelable (see dvd-rip-r6n).
-        if await cd.is_audio_cd(DVD_DEVICE):
-            return await cd.scan(DVD_DEVICE, mb_client=request.app.state.musicbrainz)
+        if await cd.is_audio_cd(cd_device):
+            return await cd.scan(cd_device, mb_client=request.app.state.musicbrainz)
         if coordinator.cancelled:
             return ScanResult(dvd_label="UNKNOWN_DVD", titles=[])
-        if await is_dvd_video(DVD_DEVICE, register_proc=register_proc):
-            return await scan(DVD_DEVICE, register_proc=register_proc)
+        if await is_dvd_video(device, register_proc=register_proc):
+            return await scan(device, register_proc=register_proc)
         if coordinator.cancelled:
             return ScanResult(dvd_label="UNKNOWN_DVD", titles=[])
-        bd = await bluray_detect_and_scan(DVD_DEVICE, register_proc=register_proc)
+        bd = await bluray_detect_and_scan(device, register_proc=register_proc)
         if bd is not None:
             return bd
         if coordinator.cancelled:
             return ScanResult(dvd_label="UNKNOWN_DVD", titles=[])
-        return await scan(DVD_DEVICE, register_proc=register_proc)
+        return await scan(device, register_proc=register_proc)
 
     try:
         return await coordinator.run(_probe)
@@ -274,6 +290,14 @@ def _require_scan_idle(request: Request) -> None:
 async def api_rip(payload: RipRequest, request: Request) -> dict:
     if not payload.titles:
         raise HTTPException(status_code=400, detail="No titles selected")
+    # Reject rather than quietly falling back to x264: the user picked Speed for
+    # the speed, and a silent substitution just looks like the rip hung.
+    if payload.encoder_mode is EncoderMode.SPEED and not hostenv.speed_mode_available():
+        raise HTTPException(
+            status_code=400,
+            detail="Speed mode is unavailable on this host (no supported hardware "
+                   "encoder); use Quality mode.",
+        )
     if payload.content_type is ContentType.MOVIE and payload.movie is None:
         raise HTTPException(status_code=400, detail="movie metadata required for content_type=movie")
     if payload.content_type is ContentType.TV:

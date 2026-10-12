@@ -49,13 +49,6 @@ services:
       - "www.makemkv.com:${MAKEMKV_HOST_IP:-88.212.208.67}"
     group_add:
       - "${CDROM_GID:-24}"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu, video]
     # On-demand only: do not auto-start on host boot / Docker daemon restart.
     # Start with `make up` (or `make up-d`); stop with `make down` (or Ctrl-C).
     restart: "no"

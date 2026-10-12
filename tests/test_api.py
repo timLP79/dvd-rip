@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,13 +7,15 @@ from app.models import AudioTrack, ScanResult, SubtitleTrack, Title
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, request):
     monkeypatch.setenv("OUTPUT_ROOT", str(tmp_path / "output"))
     monkeypatch.setenv("DVD_DEVICE", "/dev/null")
     monkeypatch.setenv("TMDB_API_KEY", "")
     monkeypatch.setenv("LIBRARY_DB", str(tmp_path / "library.db"))
     from importlib import reload
-    from app import main as main_module
+    from app import hostenv, main as main_module
+    monkeypatch.setattr(hostenv, "SPEED_ENCODER", None)
+    monkeypatch.setattr(hostenv, "detect_speed_encoder", lambda: getattr(request, "param", None))
     reload(main_module)
     with TestClient(main_module.app) as c:
         yield c
@@ -24,6 +26,39 @@ def test_index_renders(client):
     assert res.status_code == 200
     assert "DVD Rip" in res.text
     assert "Start Rip" in res.text
+
+
+@pytest.mark.parametrize("client, available", [(None, False), ("nvenc_h264", True)],
+                         indirect=["client"])
+def test_speed_ui_and_api_follow_startup_detection(client, available):
+    from app import hostenv
+
+    assert hostenv.speed_mode_available() is available
+    html = client.get("/").text
+    assert 'name="encoder_mode" value="quality" checked' in html
+    assert ('name="encoder_mode" value="speed"' in html) is available
+
+    # Only test acceptance here, without starting an actual optical-drive job.
+    enqueue = Mock(return_value=Mock(id="test-job"))
+    payload = {
+        "dvd_label": "TEST",
+        "encoder_mode": "speed", "content_type": "movie",
+        "movie": {"title": "Test", "year": 2020},
+        "titles": [{"index": 1, "audio_tracks": [1], "subtitle_tracks": []}],
+    }
+    with patch.object(client.app.state.ripper, "enqueue", enqueue):
+        res = client.post("/api/rip", json=payload)
+        if available:
+            assert res.status_code == 200
+            assert res.json()["job_ids"] == ["test-job"]
+            enqueue.assert_called_once()
+        else:
+            assert res.status_code == 400
+            assert "Speed mode is unavailable" in res.json()["detail"]
+            enqueue.assert_not_called()
+        # CPU Quality requests work regardless of the detected GPU capability.
+        payload["encoder_mode"] = "quality"
+        assert client.post("/api/rip", json=payload).status_code == 200
 
 
 def test_scan_endpoint_returns_titles(client):

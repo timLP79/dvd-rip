@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -18,6 +19,15 @@ from .models import AudioTrack, ScanResult, SubtitleTrack, Title
 log = logging.getLogger(__name__)
 
 _MAIN_FEATURE_MIN_SECONDS = 20 * 60
+
+# How long HandBrake gets to scan the disc structure. Generous by default: the
+# budget is set by the worst realistic disc, not the typical one. A dual-layer
+# disc with structural (ARccOS-style) protection presents a dozen-plus decoy
+# two-hour titles, and HandBrake walks every one of them over an optical bus at
+# a few hundred KB/s — measured well past the previous 120s ceiling on a USB
+# drive. Timing out yields an EMPTY title list, which reads as "this disc has
+# nothing on it", so an over-tight bound fails misleadingly rather than loudly.
+SCAN_TIMEOUT = float(os.getenv("HANDBRAKE_SCAN_TIMEOUT", "600"))
 
 
 def classify_aspect(width: int, height: int, par_num: int = 1, par_den: int = 1) -> Optional[str]:
@@ -199,15 +209,25 @@ async def scan(
     )
 
     titles: list[Title] = []
+    warning: Optional[str] = None
     try:
-        rc, stdout, stderr = await _spawn(cmds.handbrake, register_proc=register_proc)
+        rc, stdout, stderr = await _spawn(
+            cmds.handbrake, timeout=SCAN_TIMEOUT, register_proc=register_proc)
         if rc != 0:
             log.warning("HandBrakeCLI scan returned %s: %s", rc, stderr.strip()[:500])
         titles = parse_handbrake_scan(stdout)
     except FileNotFoundError:
         log.error("HandBrakeCLI not found on PATH")
+        warning = "HandBrakeCLI is not installed."
     except asyncio.TimeoutError:
-        log.error("HandBrakeCLI scan timed out for %s", device)
+        # Distinguished from "disc has no titles": both end up with an empty list,
+        # and without this the UI reports a blank disc when the scan simply ran out
+        # of time. Heavily protected discs are the usual cause.
+        log.error("HandBrakeCLI scan timed out for %s after %.0fs", device, SCAN_TIMEOUT)
+        warning = (
+            f"Disc scan timed out after {SCAN_TIMEOUT:.0f}s — the disc may use copy "
+            f"protection that makes scanning slow. Raise HANDBRAKE_SCAN_TIMEOUT and rescan."
+        )
 
     label = "UNKNOWN_DVD"
     try:
@@ -217,4 +237,4 @@ async def scan(
     except (FileNotFoundError, asyncio.TimeoutError):
         pass
 
-    return ScanResult(dvd_label=label, titles=titles)
+    return ScanResult(dvd_label=label, titles=titles, warning=warning)

@@ -5,15 +5,34 @@
 
 SHELL := /bin/bash
 
+UNAME_S := $(shell uname -s)
+
 OUTPUT_DIR ?= ./output
-DVD_DEVICE ?= /dev/sr0
 PORT ?= 8000
 
+# On macOS the drive has no stable path and is detected at scan time, so the
+# default is empty — an empty DVD_DEVICE means "auto-detect" to app/hostenv.py.
+# Setting it explicitly (make native DVD_DEVICE=/dev/rdisk4) still pins it.
+ifeq ($(UNAME_S),Darwin)
+DVD_DEVICE ?=
+else
+DVD_DEVICE ?= /dev/sr0
+endif
+
+# Interpreter for the local venv (tests + native run). NOT plain `python3`: the
+# pinned pydantic-core publishes no wheels for 3.14 and none for the free-threaded
+# 3.14t build, where pip falls back to compiling Rust and fails. Pick the newest
+# version that has wheels; override with `make test PYTHON=...`.
+PYTHON ?= $(shell for p in python3.13 python3.12 python3.11 python3; do \
+	command -v $$p >/dev/null 2>&1 && echo $$p && break; done)
+
 # Run the container as the invoking user so files in OUTPUT_DIR end up owned by
-# them, and join the host's cdrom group so /dev/sr0 is readable.
+# them, and join the host's cdrom group so /dev/sr0 is readable. `getent` is
+# Linux-only; on macOS these are unused (there is no container path — see `native`)
+# but must still evaluate so `make help` works.
 PUID ?= $(shell id -u)
 PGID ?= $(shell id -g)
-CDROM_GID ?= $(shell getent group cdrom 2>/dev/null | cut -d: -f3 || echo 24)
+CDROM_GID ?= $(shell getent group cdrom 2>/dev/null | cut -d: -f3 | grep . || echo 24)
 
 # SCSI-generic node MakeMKV uses for the optical drive. Its /dev/sgN number shifts
 # across reboots/USB reconnects, so derive it from the drive's sysfs entry rather
@@ -39,27 +58,51 @@ help: ## Show this help
 		/^[a-zA-Z0-9_-]+:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf "\nVariables (override with make VAR=value):\n"
 	@printf "  OUTPUT_DIR    where ripped MP4s go on host    [%s]\n" "$(OUTPUT_DIR)"
-	@printf "  DVD_DEVICE    DVD device on host              [%s]\n" "$(DVD_DEVICE)"
+	@printf "  DVD_DEVICE    DVD device on host              [%s]\n" "$(if $(DVD_DEVICE),$(DVD_DEVICE),auto-detect)"
 	@printf "  PORT          host port for the web UI        [%s]\n" "$(PORT)"
 	@printf "  PUID          uid to run the container as     [%s]\n" "$(PUID)"
 	@printf "  PGID          gid to run the container as     [%s]\n" "$(PGID)"
 	@printf "  CDROM_GID     host cdrom group gid            [%s]\n" "$(CDROM_GID)"
 	@printf "  BD_SG_DEVICE  optical drive SCSI-generic node [%s]\n" "$(BD_SG_DEVICE)"
+	@printf "  PYTHON        interpreter for the local venv  [%s]\n" "$(PYTHON)"
+ifeq ($(UNAME_S),Darwin)
+	@printf "\n\033[33mmacOS:\033[0m Docker cannot reach an optical drive here. Use \033[36mmake native\033[0m\n"
+	@printf "       (and \033[36mmake doctor\033[0m to check the Homebrew toolchain).\n"
+endif
 
 .PHONY: build
 build: ## Build the docker image
 	$(COMPOSE) build
 
 .PHONY: up
-up: ## Start the container in the foreground (Ctrl-C to stop)
+up: check-docker-can-see-drive ## Start the container in the foreground (Ctrl-C to stop)
 	@mkdir -p "$(OUTPUT_DIR)"
 	$(COMPOSE) up
 
 .PHONY: up-d
-up-d: ## Start the container detached
+up-d: check-docker-can-see-drive ## Start the container detached
 	@mkdir -p "$(OUTPUT_DIR)"
 	$(COMPOSE) up -d
 	@echo "Open http://localhost:$(PORT)"
+
+# Docker on macOS runs a Linux VM with no optical/USB passthrough, so the
+# `devices:` mapping in docker-compose.yml can never resolve. Starting anyway
+# fails with an opaque device error, or (worse) starts a container that reports
+# "no disc" forever. Say so instead. FORCE=1 to override.
+.PHONY: check-docker-can-see-drive
+check-docker-can-see-drive:
+ifeq ($(UNAME_S),Darwin)
+	@if [ "$(FORCE)" != "1" ]; then \
+	  echo ""; \
+	  echo "  ⚠  Docker can't reach an optical drive on macOS — its Linux VM has no"; \
+	  echo "     USB/optical passthrough, so the container would never see a disc."; \
+	  echo ""; \
+	  echo "     Run natively instead:  make native   (setup check: make doctor)"; \
+	  echo "     To start the container anyway:  make up FORCE=1"; \
+	  echo ""; \
+	  exit 1; \
+	fi
+endif
 
 .PHONY: down
 down: check-no-active-jobs ## Stop and remove the container (warns if jobs are running)
@@ -107,8 +150,18 @@ jobs: ## List current rip jobs
 	@curl -fsS http://localhost:$(PORT)/api/jobs | python3 -m json.tool
 
 .PHONY: open
-open: ## Open the web UI in the default browser (Linux)
-	@xdg-open http://localhost:$(PORT) 2>/dev/null || echo "Visit http://localhost:$(PORT)"
+open: ## Open the web UI in the default browser
+	@(open http://localhost:$(PORT) 2>/dev/null \
+	  || xdg-open http://localhost:$(PORT) 2>/dev/null) \
+	  || echo "Visit http://localhost:$(PORT)"
+
+.PHONY: native
+native: venv ## Run natively without Docker (the only working mode on macOS)
+	@./scripts/run-native.sh
+
+.PHONY: doctor
+doctor: ## Check the native toolchain, drive detection and encoder support
+	@./scripts/doctor.sh
 
 .PHONY: test
 test: venv ## Run the test suite in a local venv
@@ -137,8 +190,8 @@ print('VAPID_SUBJECT=mailto:you@example.com')"
 venv: .venv/bin/python ## Create local Python venv with dev deps
 
 .venv/bin/python:
-	python3 -m venv .venv
-	.venv/bin/pip install --quiet -r requirements.txt pytest httpx
+	$(PYTHON) -m venv .venv
+	.venv/bin/pip install --quiet -r requirements-dev.txt
 
 .PHONY: clean
 clean: ## Remove the built image (does not touch output files)
