@@ -89,6 +89,13 @@ function parseDiscLabel(label) {
 
 // ---------- Scan ----------
 
+function scanStatusText(elapsedSeconds) {
+  if (elapsedSeconds < 20) return 'Scanning…';
+  if (elapsedSeconds < 45) return `Scanning… (${fmtDuration(elapsedSeconds)})`;
+  return `Scanning… (${fmtDuration(elapsedSeconds)}) — copy-protected or ` +
+    'multi-title discs can take a minute or two. This is normal, no need to cancel.';
+}
+
 async function scan() {
   const status = $('#scan-status');
   const discSec = $('#disc-meta-section');
@@ -96,7 +103,8 @@ async function scan() {
   const rescanBtn = $('#btn-rescan');
   const cancelBtn = $('#btn-scan-cancel');
   state.scanCancelled = false;
-  status.textContent = 'Scanning…';
+  let elapsed = 0;
+  status.textContent = scanStatusText(elapsed);
   status.classList.remove('error');
   status.hidden = false;
   discSec.hidden = true;
@@ -104,6 +112,10 @@ async function scan() {
   rescanBtn.disabled = true;
   cancelBtn.hidden = false;
   cancelBtn.disabled = false;
+  const tick = setInterval(() => {
+    elapsed += 1;
+    status.textContent = scanStatusText(elapsed);
+  }, 1000);
   try {
     const res = await fetch('/api/scan');
     if (res.status === 409) {
@@ -154,6 +166,7 @@ async function scan() {
       status.classList.add('error');
     }
   } finally {
+    clearInterval(tick);
     rescanBtn.disabled = false;
     cancelBtn.hidden = true;
   }
